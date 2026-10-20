@@ -27,7 +27,7 @@ Xiaomi/piano/piano:17/CP2A.260605.016/OS4.0.2.0.XPYCNXM:user/release-keys
 
 功能设置入口：系统设置 → 手写笔与键盘 → 手写笔 → 功能设置。独立应用提供进入设置的入口。
 
-构建环境、测试和配置备份见 [构建说明](docs/BUILD.md)。架构与行为边界见 [设计说明](docs/DESIGN.md)。已知问题与验收状态见 [0.7.6 发布说明](docs/releases/0.7.6.md)。
+构建环境、测试和配置备份见 [构建说明](docs/BUILD.md)。架构与行为边界见 [设计说明](docs/DESIGN.md)。已知问题与验收状态见 [0.7.7 发布说明](docs/releases/0.7.7.md)。
 
 ## 致谢
 
