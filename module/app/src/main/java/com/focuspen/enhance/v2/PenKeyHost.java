@@ -518,9 +518,20 @@ final class PenKeyHost {
                 || start.getDeviceId() != event.getDeviceId() || start.getKeyCode() != event.getKeyCode()) return;
         if (event.getAction() == KeyEvent.ACTION_UP) {
             replayDown[button] = null;
-            if(replayToApp[button]){if(current(target))replayKey(event,PenAction.NONE);}
+            if(replayToApp[button]) releaseAppKey(event,target);
             else inject(event); // Release a dispatched native DOWN even if its original window has gone away.
         } else if (current(target) && target.supportsDirection()) replayKey(event,replayToApp[button]?PenAction.NONE:PenAction.NATIVE);
+    }
+    private void releaseAppKey(KeyEvent event, KeyTarget target) {
+        boolean cancelled;
+        synchronized (lock) {
+            updateLockState();
+            if (target == null || !target.sameWindow(focusedWindow, focusEpoch) || !keysInteractive) return;
+            // A config change may stop repeats, but the unchanged app still owns its delivered DOWN.
+            // Finish it as cancelled; never turn this cleanup into a new action or a new window's UP.
+            cancelled = config.get().revision != target.revision() || !ownsKeys();
+        }
+        replayKey(cancelled ? KeyEvent.changeFlags(event,event.getFlags() | KeyEvent.FLAG_CANCELED) : event,PenAction.NONE);
     }
     private boolean replayKey(KeyEvent event,PenAction action){
         if(action!=PenAction.NONE)return inject(event);

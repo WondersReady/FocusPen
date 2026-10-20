@@ -20,7 +20,7 @@ sources = {
  public void drain(){while(!queue.isEmpty())queue.remove().run();}
 }''',
 "android/os/SystemClock.java": 'package android.os; public class SystemClock {public static long now; public static long uptimeMillis(){return now;}}',
-"android/os/PowerManager.java": 'package android.os; public class PowerManager {public boolean isInteractive(){return true;}}',
+"android/os/PowerManager.java": 'package android.os; public class PowerManager {public static boolean interactive=true;public boolean isInteractive(){return interactive;}}',
 "android/os/Build.java": 'package android.os; public class Build {public static String FINGERPRINT="test";}',
 "android/content/Context.java": '''package android.content; public class Context {
  public <T>T getSystemService(Class<T> c){try{return c.getConstructor().newInstance();}catch(Exception e){throw new RuntimeException(e);}}
@@ -34,6 +34,7 @@ sources = {
  final long down,time; final int action,code,repeat,meta,device,scan,flags,source;
  public KeyEvent(long d,long t,int a,int c,int r,int m,int dev,int sc,int f,int s){down=d;time=t;action=a;code=c;repeat=r;meta=m;device=dev;scan=sc;flags=f;source=s;}
  public KeyEvent(KeyEvent e){this(e.down,e.time,e.action,e.code,e.repeat,e.meta,e.device,e.scan,e.flags,e.source);}
+ public static KeyEvent changeFlags(KeyEvent e,int flags){return new KeyEvent(e.down,e.time,e.action,e.code,e.repeat,e.meta,e.device,e.scan,flags,e.source);}
  public long getDownTime(){return down;} public int getKeyCode(){return code;} public int getDeviceId(){return device;}
  public int getRepeatCount(){return repeat;} public int getAction(){return action;} public int getMetaState(){return meta;}
  public int getSource(){return source;} public int getFlags(){return flags;} public int getScanCode(){return scan;}
@@ -119,6 +120,7 @@ public class KeyTargetHostTest {
   f=PenKeyHost.class.getDeclaredField("policyInstance");f.setAccessible(true);f.set(host,new Object());
   f=PenKeyHost.class.getDeclaredField("stylusManagerType");f.setAccessible(true);f.set(null,StylusManager.class);
   StylusManager.instance=new StylusManager();PenPresentation.allowed=false;PenPresentation.colorCalls=0;
+  android.os.PowerManager.interactive=true;
   ConfigClient.last.state=new ConfigSnapshot(1,adapter,action);window=new Object();focus(window,"reader.example");drain();
   RuntimeBus.last.events.clear();NativeKeyReplay.sent.clear();OfficialPenActions.count=0;de.robv.android.xposed.XposedHelpers.policyCalls=0;
  }
@@ -163,6 +165,35 @@ public class KeyTargetHostTest {
   repeat(0,100);drain();event(1,0,500);drain();
   check(NativeKeyReplay.sent.size()==3&&NativeKeyReplay.sent.get(1).getRepeatCount()==1&&NativeKeyReplay.sent.get(2).getAction()==1,"App hold must preserve repeats and release");
   check(de.robv.android.xposed.XposedHelpers.policyCalls==0,"App passthrough must bypass official shortcut policy");
+  setup("native",PenAction.NONE);ConfigClient.last.state.first=PenAction.NONE;event(0,0,0);drain();
+  ConfigClient.last.state=new ConfigSnapshot(2,"page",PenAction.NOTE);repeat(0,100);drain();event(1,0,200);drain();
+  check(NativeKeyReplay.sent.size()==2&&NativeKeyReplay.sent.get(1).getAction()==1&&NativeKeyReplay.sent.get(1).isCanceled(),"Config change must cancel a delivered app DOWN in its unchanged window");
+  check(de.robv.android.xposed.XposedHelpers.policyCalls==0,"Cancelled application UP must not enter official shortcut policy");
+  setup("native",PenAction.NONE);ConfigClient.last.state.second=PenAction.NONE;
+  call("key",new Class[]{KeyEvent.class,boolean.class},new KeyEvent(1000,1000,0,92,0,3,1,44,2,257),true);drain();
+  ConfigClient.last.state=new ConfigSnapshot(2,"page",PenAction.NOTE);
+  call("key",new Class[]{KeyEvent.class,boolean.class},new KeyEvent(1000,1300,1,92,0,3,1,44,2,257),true);drain();
+  KeyEvent cleanup=NativeKeyReplay.sent.get(1);
+  check(NativeKeyReplay.sent.size()==2&&cleanup.getDownTime()==1000&&cleanup.getKeyCode()==92&&cleanup.getDeviceId()==1
+    &&cleanup.getScanCode()==44&&cleanup.getMetaState()==3&&cleanup.getSource()==257&&cleanup.getFlags()==(2|KeyEvent.FLAG_CANCELED),"Cancelled UP must preserve the physical pen identity and existing flags");
+  setup("native",PenAction.NONE);ConfigClient.last.state.first=PenAction.NONE;event(0,0,0);drain();
+  ConfigClient.last.state.available=false;event(1,0,200);drain();
+  check(NativeKeyReplay.sent.size()==2&&NativeKeyReplay.sent.get(1).isCanceled(),"Unavailable config must still finish the delivered app press");
+  setup("native",PenAction.NONE);ConfigClient.last.state.first=PenAction.NONE;event(0,0,0);
+  ConfigClient.last.state=new ConfigSnapshot(2,"page",PenAction.NOTE);event(1,0,200);drain();
+  check(NativeKeyReplay.sent.isEmpty(),"Cancelled queued DOWN must not produce an orphan UP");
+  setup("native",PenAction.NONE);ConfigClient.last.state.first=PenAction.NONE;event(0,0,0);drain();
+  focus(new Object(),"reader.example");event(1,0,200);drain();
+  check(NativeKeyReplay.sent.size()==1,"App UP must not cross a same-package window change");
+  setup("native",PenAction.NONE);ConfigClient.last.state.first=PenAction.NONE;event(0,0,0);drain();
+  focus(new Object(),"other.example");focus(window,"reader.example");event(1,0,200);drain();
+  check(NativeKeyReplay.sent.size()==1,"Returning to the old window must not revive an app press");
+  setup("native",PenAction.NONE);ConfigClient.last.state.first=PenAction.NONE;event(0,0,0);drain();
+  android.app.KeyguardManager.locked=true;event(1,0,200);drain();
+  check(NativeKeyReplay.sent.size()==1,"Locked window must not receive a replayed app release");
+  setup("native",PenAction.NONE);ConfigClient.last.state.first=PenAction.NONE;event(0,0,0);drain();
+  android.os.PowerManager.interactive=false;event(1,0,200);drain();
+  check(NativeKeyReplay.sent.size()==1,"Sleeping display must not receive a replayed app release");
   setup("native",PenAction.RING);ConfigClient.last.state.first=PenAction.NOTE;event(0,0,0);event(1,0,20);event(0,100,100);event(1,100,120);drain();
   check(NativeKeyReplay.sent.size()==4&&OfficialPenActions.count==0&&de.robv.android.xposed.XposedHelpers.policyCalls==0,"App double gets both original pairs without module short or native shortcut");
   setup("native",PenAction.NONE);ConfigClient.last.state.first=PenAction.NONE;event(0,0,0);drain();event(0,1000,1000);drain();event(1,1000,1100);drain();
