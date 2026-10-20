@@ -67,6 +67,8 @@ final class PenPresentation {
         return !PenMouse.active() && c!=null && (mode(c)==1 || XposedHelpers.getBooleanField(state(c),"mPresentationVisible"));
     }
     static boolean presenting(){return active(controller);}
+    /** True while the standard side keys are reserved for presentation color changes. */
+    static boolean colorRoutingActive(){return controller!=null&&enabled()&&active(controller);}
     // The standard pen stops sending air-motion samples after key-up in mode 0.
     // Keep the official continuous BLE stream while leaving the renderer in laser mode.
     private static void latchMotion(Object c,boolean value) {

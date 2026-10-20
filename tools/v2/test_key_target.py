@@ -282,7 +282,8 @@ sources.update({
 "android/content/pm/PackageManager.java": 'package android.content.pm;public class PackageManager {public android.content.Intent getLaunchIntentForPackage(String p){return null;}}',
 "android/hardware/input/InputManager.java": 'package android.hardware.input;public class InputManager {}',
 "com/focuspen/enhance/v2/PenPresentation.java": '''package com.focuspen.enhance.v2;class PenPresentation {
- static boolean showing,allowed;static int colorCalls,direction;static void install(ClassLoader c){}static void bind(android.content.Context c,ConfigClient f){}static void reset(){}static void laserMode(){}
+ static boolean showing,allowed,colorActive;static int colorCalls,direction;static void install(ClassLoader c){}static void bind(android.content.Context c,ConfigClient f){}static void reset(){}static void laserMode(){}
+ static boolean colorRoutingActive(){return colorActive;}
  static boolean presenting(){return showing;}static boolean colorKey(android.view.KeyEvent e,int d,boolean a){allowed=a;direction=d;colorCalls++;return showing&&a;}
 }''',
 "com/focuspen/enhance/v2/PenMouse.java": '''package com.focuspen.enhance.v2;class PenMouse {

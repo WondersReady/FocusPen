@@ -134,6 +134,12 @@ public final class InputStateTest {
         require(!gate.blocks(1, owned, PenAction.NATIVE), "switch to native takes effect before next input");
         require(!gate.observe(1, true, owned, PenAction.NATIVE), "native long retains its timer");
         require(!gate.blocks(1, owned, PenAction.RING), "native observation clears old ownership");
+        require(gate.observe(1, true, owned, PenAction.NATIVE, true),
+                "presentation color owner must guard native timer even with native action");
+        require(gate.blocks(1, owned, PenAction.NATIVE),
+                "presentation color owner lost native timer guard");
+        require(!gate.observe(1, true, owned, PenAction.NATIVE, false),
+                "presentation guard must clear after presentation ends");
         gate.observe(2, true, owned, PenAction.RECOGNITION);
         require(!gate.observe(2, false, owned, PenAction.RECOGNITION), "other pen types retain native policy");
         require(!gate.blocks(2, owned, PenAction.RECOGNITION), "other pen clears delayed-action guard");

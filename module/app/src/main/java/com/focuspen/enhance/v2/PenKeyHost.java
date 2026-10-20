@@ -93,7 +93,8 @@ final class PenKeyHost {
                 try {
                     ConfigSnapshot snapshot = host.config.get();
                     boolean block = host.nativeGate.observe(candidate, button(event) != 0, host.ownsKeys(),
-                            host.resolved(snapshot.action(host.foreground,candidate,false), snapshot));
+                            host.resolved(snapshot.action(host.foreground,candidate,false), snapshot),
+                            candidate <= 2 && PenPresentation.colorRoutingActive());
                     if (!block) return;
                     // Focus-key taps change the native laser mode. Keep that tap handler and guard
                     // only its long timer below, so a native short/custom long mapping still works.
@@ -397,7 +398,8 @@ final class PenKeyHost {
                 PenAction shortAction = keyguardState ? PenAction.NONE : resolved(s.shortAction(foreground,button),s);
                 PenAction longAction = keyguardState ? (button==1?PenAction.RING:PenAction.SCREENSHOT) : resolved(s.action(foreground,button,false), s);
                 PenAction twice = keyguardState ? PenAction.NONE : resolved(s.action(foreground,button,true),s);
-                nativeGate.observe(button, true, take, longAction);
+                nativeGate.observe(button, true, take, longAction,
+                        button <= 2 && PenPresentation.colorRoutingActive());
                 if (e.getRepeatCount() == 0)
                     Log.i("FocusPenKeys", "button=" + button + " takeover=" + take + " ui=" + uiAvailable()
                             + " short=" + shortAction.id + " long=" + longAction.id + " replay=" + replayHealthy);
