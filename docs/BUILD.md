@@ -27,6 +27,7 @@ bash tools/v2/test_pro.sh
 python3 tools/v2/test_presentation.py
 bash tools/v2/test_motion.sh
 python3 tools/v2/test_guide_media.py
+python3 tools/v2/test_menu_drag.py
 ```
 
 测试使用生产状态机或生产宿主代码配合 Android／ROM 替身。它们不证明实笔跟随、屏幕帧率、原生材质、设备声音路由或 Pro 硬件兼容性。输出写入已忽略的 `work/`。

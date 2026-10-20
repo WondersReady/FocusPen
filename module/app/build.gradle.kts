@@ -13,8 +13,8 @@ android {
         applicationId = "com.focuspen.enhance.v2"
         minSdk = 28
         targetSdk = 37
-        versionCode = 31
-        versionName = "0.7.6-guide-dev"
+        versionCode = 32
+        versionName = "0.7.7-editor-dev"
     }
 
     compileOptions {

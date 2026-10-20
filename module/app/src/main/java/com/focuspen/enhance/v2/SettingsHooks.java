@@ -116,6 +116,8 @@ final class SettingsHooks {
         register(cl.loadClass("androidx.preference.Preference"), "onBindViewHolder", holder, new XC_MethodHook() {
             @Override protected void afterHookedMethod(MethodHookParam p) {
                 String key = (String) call(p.thisObject, "getKey");
+                android.view.View row=(android.view.View)XposedHelpers.getObjectField(p.args[0],"itemView");
+                AppRowStyle.bind(row,key!=null&&(key.startsWith(PREFIX+"add.")||key.startsWith(PREFIX+"pick.")));
                 if (key != null && key.startsWith(PREFIX + "guide.card."))
                     GuideNative.card(p.thisObject, p.args[0], Integer.parseInt(key.substring(key.lastIndexOf('.') + 1)));
                 if ((PREFIX+"content.preview").equals(key)) {
