@@ -118,6 +118,14 @@ public class MenuDragTest {
   list.afterScroll=()->{for(int i=4;i<12;i++){View row=roots.get(i);if(!list.children.contains(row)&&i*60-list.scroll<240){row.top=i*60-list.scroll;list.children.add(row);}}};
   event(0,0,130);event(0,2,330);frames(90);event(0,1,330);finish(0);
   check(commits.equals(List.of("item0:11")),"newly attached rows missing from destinations: "+commits);idle();
+  setup(3);event(0,0,130);event(0,2,165);event(0,1,250);finish(0);
+  check(commits.equals(List.of("item0:2")),"release position ignored at end of fast drag: "+commits);idle();
+  setup(3);event(2,0,250);event(2,2,215);event(2,1,130);finish(2);
+  check(commits.equals(List.of("item2:0")),"release position ignored in reverse drag: "+commits);idle();
+  setup(3);event(0,0,130);event(0,2,250);event(0,1,130);finish(0);
+  check(commits.isEmpty(),"release at original position persisted stale destination: "+commits);idle();
+  setup(3);event(0,0,130);event(0,2,165);event(0,3,250);finish(0);
+  check(commits.isEmpty(),"cancel position persisted a move");idle();
   System.out.println("Production menu drag: edge scroll / both end moves / stationary frames / attach / cancel / multitouch / detach PASS");
  }
 }''',

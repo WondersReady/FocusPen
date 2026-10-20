@@ -82,10 +82,12 @@ final class RingEditorView extends FrameLayout {
                         if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL){
                             tracking=false;v.setPressed(false);getParent().requestDisallowInterceptTouchEvent(false);
                             if(!moving){if(e.getActionMasked()==MotionEvent.ACTION_UP)v.performClick();return true;}
-                            int destination=e.getActionMasked()==MotionEvent.ACTION_UP?dropIndex:-1;
+                            // Use the final pointer position even when no MOVE was delivered there.
+                            int destination=e.getActionMasked()==MotionEvent.ACTION_UP?
+                                    nearest(v.getLeft()+v.getWidth()/2f+e.getRawX()-downX,v.getTop()+v.getHeight()/2f+e.getRawY()-downY):-1;
                             boolean changed=destination>=0&&destination!=source;
                             View slot=getChildAt((changed?destination:source)+1);
-                            if(!changed)makeRoom(source,-1);
+                            makeRoom(source,changed?destination:-1);
                             Runnable settled=()->{if(generation!=dragGeneration||!isAttachedToWindow())return;
                                 if(!changed)dragged=null;v.setTranslationZ(0);dropIndex=-1;center.setText(hint);invalidate();
                                 if(changed){move.accept(item.id(),destination);

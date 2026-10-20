@@ -61,6 +61,8 @@ final class MenuPickerViews {
                     }return true;
                 }
                 if(e.getActionMasked()==MotionEvent.ACTION_UP||e.getActionMasked()==MotionEvent.ACTION_CANCEL){
+                    // The release can carry a newer position than the last MOVE frame.
+                    if(moving&&e.getActionMasked()==MotionEvent.ACTION_UP){pointerY=e.getRawY();updatePosition();}
                     tracking=false;root.removeCallbacks(scrollFrame);if(root.getParent()!=null)root.getParent().requestDisallowInterceptTouchEvent(false);
                     boolean save=moving&&e.getActionMasked()==MotionEvent.ACTION_UP&&destination!=position;
                     if(moving){root.setBackground(background);root.setTranslationZ(0);}
