@@ -100,6 +100,10 @@ sources = {
 "com/focuspen/enhance/v2/KeyTargetHostTest.java": '''package com.focuspen.enhance.v2;
 import android.view.KeyEvent; import android.os.SystemClock; import java.lang.reflect.*;
 public class KeyTargetHostTest {
+ public static class StylusManager {
+  public static StylusManager instance=new StylusManager();public boolean mIsGameMode;
+  public static StylusManager getInstance(){return instance;}
+ }
  public static class ProManager {public boolean mIsGameMode=false,mIsTouchFilmStylusConnected=true,mCurrentSlideStatus=true,mCurrentDoubleTapStatus=true;public int mCurrentPinchStatus=3,mCurrentVirtualLaserStatus=0;}
  static PenKeyHost host; static Object window; static long time;
  static Object call(String name,Class<?>[] types,Object...args)throws Exception {Method m=PenKeyHost.class.getDeclaredMethod(name,types);m.setAccessible(true);return m.invoke(host,args);}
@@ -113,6 +117,8 @@ public class KeyTargetHostTest {
   Constructor<PenKeyHost> c=PenKeyHost.class.getDeclaredConstructor(android.content.Context.class);c.setAccessible(true);host=c.newInstance(new android.content.Context());
   Field f=PenKeyHost.class.getDeclaredField("stylusType");f.setAccessible(true);f.set(null,android.view.InputDevice.class.getMethod("isXiaomiStylus"));
   f=PenKeyHost.class.getDeclaredField("policyInstance");f.setAccessible(true);f.set(host,new Object());
+  f=PenKeyHost.class.getDeclaredField("stylusManagerType");f.setAccessible(true);f.set(null,StylusManager.class);
+  StylusManager.instance=new StylusManager();PenPresentation.allowed=false;PenPresentation.colorCalls=0;
   ConfigClient.last.state=new ConfigSnapshot(1,adapter,action);window=new Object();focus(window,"reader.example");drain();
   RuntimeBus.last.events.clear();NativeKeyReplay.sent.clear();OfficialPenActions.count=0;de.robv.android.xposed.XposedHelpers.policyCalls=0;
  }
@@ -121,6 +127,33 @@ public class KeyTargetHostTest {
   SystemClock.now=now;return (Boolean)call("proKey",new Class[]{Object.class,KeyEvent.class,boolean.class},manager,new KeyEvent(start,now,action,code,0,0,device,0,0,257),screen);
  }
  public static void main(String[] args)throws Exception {
+  // Exercise the production host's eligibility boundary. Color rendering and pair ownership
+  // are tested with the real PenPresentation in test_presentation.py; this probe only records routing.
+  for(int code:new int[]{93,92}) {
+   setup("native",PenAction.NOTE);PenPresentation.showing=true;
+   boolean captured=(Boolean)call("key",new Class[]{KeyEvent.class,boolean.class},new KeyEvent(10,10,0,code,0,0,1,0,0,257),true);
+   tick(600);drain();
+   check(captured&&PenPresentation.allowed&&PenPresentation.colorCalls==1,"Visible presentation must own standard color DOWN");
+   check(PenPresentation.direction==(code==93?-1:1),"Color key direction mismatch");
+   check(NativeKeyReplay.sent.isEmpty()&&OfficialPenActions.count==0&&!RuntimeBus.last.events.contains("action"),"Color key leaked into ordinary action arbitration");
+  }
+  setup("native",PenAction.NOTE);PenPresentation.showing=true;
+  StylusManager.instance.mIsGameMode=true;event(0,0,0);
+  check(!PenPresentation.allowed,"Game mode must exclude presentation colors");
+  setup("native",PenAction.NOTE);PenPresentation.showing=true;
+  focus(new Object(),"com.android.camera");event(0,0,0);
+  check(!PenPresentation.allowed,"Camera must exclude presentation colors");
+  setup("native",PenAction.NOTE);PenPresentation.showing=true;
+  android.app.KeyguardManager.locked=true;event(0,0,0);
+  check(!PenPresentation.allowed,"Keyguard must exclude presentation colors");
+  setup("native",PenAction.NOTE);PenPresentation.showing=true;
+  ConfigClient.last.state.available=false;event(0,0,0);
+  check(!PenPresentation.allowed,"Unavailable configuration must exclude presentation colors");
+  setup("native",PenAction.NOTE);PenPresentation.showing=true;
+  call("key",new Class[]{KeyEvent.class,boolean.class},new KeyEvent(10,10,0,93,0,0,1,0,0,257),false);
+  check(!PenPresentation.allowed,"Screen-off key must not become a color action");
+  setup("native",PenAction.NOTE);PenPresentation.showing=true;StylusManager.instance=null;
+  event(0,0,0);check(!PenPresentation.allowed,"Missing vendor manager must retain the eligibility guard");
   setup("native",PenAction.RING);event(0,0,0);event(1,0,20);tick(300);drain();
   check(NativeKeyReplay.sent.size()==2&&NativeKeyReplay.sent.get(0).getKeyCode()==93,"Delayed short direction lost original device event");
   setup("native",PenAction.RING);ConfigClient.last.state.first=PenAction.NONE;event(0,0,0);event(1,0,20);tick(300);drain();
@@ -218,8 +251,8 @@ sources.update({
 "android/content/pm/PackageManager.java": 'package android.content.pm;public class PackageManager {public android.content.Intent getLaunchIntentForPackage(String p){return null;}}',
 "android/hardware/input/InputManager.java": 'package android.hardware.input;public class InputManager {}',
 "com/focuspen/enhance/v2/PenPresentation.java": '''package com.focuspen.enhance.v2;class PenPresentation {
- static boolean showing;static void install(ClassLoader c){}static void bind(android.content.Context c,ConfigClient f){}static void reset(){}static void laserMode(){}
- static boolean presenting(){return showing;}static boolean colorKey(android.view.KeyEvent e,int d,boolean a){return false;}
+ static boolean showing,allowed;static int colorCalls,direction;static void install(ClassLoader c){}static void bind(android.content.Context c,ConfigClient f){}static void reset(){}static void laserMode(){}
+ static boolean presenting(){return showing;}static boolean colorKey(android.view.KeyEvent e,int d,boolean a){allowed=a;direction=d;colorCalls++;return showing&&a;}
 }''',
 "com/focuspen/enhance/v2/PenMouse.java": '''package com.focuspen.enhance.v2;class PenMouse {
  PenMouse(android.os.Handler h,NativeKeyReplay r,java.util.function.Supplier<KeyTarget>s,java.util.function.Predicate<KeyTarget> p){}
@@ -228,7 +261,7 @@ sources.update({
 })
 sources["android/os/Bundle.java"]=sources["android/os/Bundle.java"].replace('public void putInt', 'public boolean getBoolean(String k,boolean d){return (boolean)getOrDefault(k,d);}public void putInt')
 sources["android/content/Context.java"]=sources["android/content/Context.java"].replace('public <T>', 'public android.content.pm.PackageManager getPackageManager(){return new android.content.pm.PackageManager();}public void startActivity(Intent i){}public <T>')
-sources["de/robv/android/xposed/XposedHelpers.java"]=sources["de/robv/android/xposed/XposedHelpers.java"].replace('public static Object getObjectField', 'public static Object callStaticMethod(Class<?> c,String n,Object...a){return null;}public static Object getObjectField')
+sources["de/robv/android/xposed/XposedHelpers.java"]=sources["de/robv/android/xposed/XposedHelpers.java"].replace('public static Object getObjectField', 'public static Object callStaticMethod(Class<?> c,String n,Object...a){try{return c.getMethod(n).invoke(null);}catch(Exception e){throw new RuntimeException(e);}}public static Object getObjectField')
 sources["com/focuspen/enhance/v2/ConfigSpec.java"]=sources["com/focuspen/enhance/v2/ConfigSpec.java"].replace('KEYS="keys"', 'SCREEN_OFF_TARGET="target",KEYS="keys"')
 sources["com/focuspen/enhance/v2/ConfigSnapshot.java"]=sources["com/focuspen/enhance/v2/ConfigSnapshot.java"].replace('int longPressMs()', 'int number(String key){return key.equals(ProBindings.HOLD)?650:360;}String proBinding(String pkg,int slot){return slot==2&&pro==PenAction.UP?"scrollUp":ProBindings.DEFAULTS[slot];}int longPressMs()')
 sources["com/focuspen/enhance/v2/OfficialPenActions.java"]=sources["com/focuspen/enhance/v2/OfficialPenActions.java"].replace('static int count;', 'static boolean screenOff(android.content.Context c,String a){return true;}static boolean lockAction(String a){return true;}static int count;')
