@@ -431,6 +431,9 @@ final class SettingsHooks {
                                     new String[]{"按住显示激光，松开隐藏","长按一次开启，再长按一次关闭"});
                             Object buttonGroup=category(c,screen,"focus.help","演示操作");
                             information(c,buttonGroup,"focus.color","演示中切换颜色","激光或圈注时，短按速记键切换上一色，短按截图键切换下一色。已有笔迹保持原色。");
+                            Object mouseGroup=category(c,screen,"focus.mouse","鼠标模式");
+                            information(c,mouseGroup,"focus.mouse.enter","双击焦点键切换","未启用激光或圈注时，快速双击焦点键进入鼠标模式；再次双击退出。");
+                            information(c,mouseGroup,"focus.mouse.buttons","点击与拖动","速记键为鼠标左键，截图键为右键；按住对应按键并移动笔可拖动。切换窗口或锁屏后退出，普通模式恢复原按键配置。");
                             continue;
                         }
                         Object buttonGroup = category(c, screen, "keys.button" + button, buttonName(button));

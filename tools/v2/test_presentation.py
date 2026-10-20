@@ -80,7 +80,7 @@ sources = {
 }''',
 'com/focuspen/enhance/v2/PenMouse': '''package com.focuspen.enhance.v2;class PenMouse {
  static boolean on;static long generation;static boolean active(){return on;}static boolean isSession(long v){return on&&generation==v;}
- static void enter(int d){}static void exit(){on=false;}static void move(float x,float y){}
+ static int enters,lastDevice;static void enter(int d){enters++;lastDevice=d;on=true;}static void exit(){on=false;}static void move(float x,float y){}
 }''',
 'com/miui/server/input/stylus/laser/LaserView': '''package com.miui.server.input.stylus.laser;import android.graphics.*;public class LaserView extends android.view.View {
  public java.util.List<Path> mPathList=new java.util.ArrayList<>();public Paint mPathPaint=new Paint(),mOutBlurPaint=new Paint(),mOutFillPaint=new Paint(),mInPaint=new Paint();
@@ -119,6 +119,14 @@ public class PresentationTest {
  static void begin(int device,long session){PenMouse.generation=session;PenMouse.on=true;PenPresentation.mouseMode(true,device,session,500,500);c.mHandler.drain();}
  static void end(long session){PenMouse.on=false;PenPresentation.mouseMode(false,8,session,0,0);c.mHandler.drain();}
  static void colorTests(ConfigClient config){
+  setup();call("interceptLaserKey",new KeyEvent(0,3));int entries=PenMouse.enters;
+  call("onLaserKeyPressed",1);check(PenMouse.enters==entries,"single focus press entered mouse");
+  call("onLaserKeyPressed",2);check(PenMouse.on&&PenMouse.enters==entries+1&&PenMouse.lastDevice==3,"standard double focus press did not enter mouse");
+  call("onLaserKeyPressed",2);check(!PenMouse.on,"standard double focus press did not exit mouse");
+  entries=PenMouse.enters;c.mLaserState.mPresentationVisible=true;call("onLaserKeyPressed",2);
+  c.mLaserState.mPresentationVisible=false;c.mLaserState.mCurrentMode=1;call("onLaserKeyPressed",2);
+  c.mLaserState.mCurrentMode=0;c.mLaserState.mKeepPath=true;call("onLaserKeyPressed",2);
+  check(PenMouse.enters==entries,"mouse stole active presentation double press");
   setup();c.mLaserView=new LaserView();LaserView view=c.mLaserView;
   view.mOutFillPaint.setColor(0x88ff001f);
   call("interceptLaserKey",new KeyEvent(0,3));call("onLaserKeyLongPressed");call("interceptLaserKey",new KeyEvent(1,3));call("interceptLaserKeyUp");
