@@ -58,10 +58,13 @@ sources = {
  public static Object callMethod(Object o,String s,Object a){return null;}
 }''',
 "t3/d.java": 'package t3; public class d {public d(android.content.Context c){}}',
+"C0/InterfaceC0001b.java": 'package C0; public interface InterfaceC0001b {}',
+"p115t3/d.java": 'package p115t3; public class d implements C0.InterfaceC0001b {public d(android.content.Context c){}}',
 "com/airbnb/lottie/LottieAnimationView.java": '''package com.airbnb.lottie; public class LottieAnimationView extends android.view.View {
  public interface Failure {void failed(Throwable t);} public Failure listener;
  public static boolean failStart,failProgress; public int starts,pauses,cancels,resource; public float progress=.4f; public boolean running;public String imageFolder;
  public LottieAnimationView(android.content.Context c){super(c);} public void setFailureListener(Failure l){listener=l;}
+ public void setImageAssetDelegate(C0.InterfaceC0001b d){}
  public void setImageAssetsFolder(String folder){imageFolder=folder;}
  public void setAnimation(int id){resource=id;} public void setRepeatCount(int n){}
  public void drawImageLayer(){if(imageFolder==null||imageFolder.isEmpty())throw new IllegalStateException("You must set an images folder before loading an image.");}
