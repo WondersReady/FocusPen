@@ -60,9 +60,11 @@ sources = {
 "t3/d.java": 'package t3; public class d {public d(android.content.Context c){}}',
 "com/airbnb/lottie/LottieAnimationView.java": '''package com.airbnb.lottie; public class LottieAnimationView extends android.view.View {
  public interface Failure {void failed(Throwable t);} public Failure listener;
- public static boolean failStart,failProgress; public int starts,pauses,cancels; public float progress=.4f; public boolean running;
+ public static boolean failStart,failProgress; public int starts,pauses,cancels,resource; public float progress=.4f; public boolean running;public String imageFolder;
  public LottieAnimationView(android.content.Context c){super(c);} public void setFailureListener(Failure l){listener=l;}
- public void setAnimation(int id){} public void setRepeatCount(int n){}
+ public void setImageAssetsFolder(String folder){imageFolder=folder;}
+ public void setAnimation(int id){resource=id;} public void setRepeatCount(int n){}
+ public void drawImageLayer(){if(imageFolder==null||imageFolder.isEmpty())throw new IllegalStateException("You must set an images folder before loading an image.");}
  public void i(){if(failStart)throw new IllegalStateException();starts++;running=true;}
  public void d(){pauses++;running=false;} public void cancelAnimation(){cancels++;running=false;}
  public float getProgress(){return progress;} public void setProgress(float f){if(failProgress)throw new IllegalStateException();progress=f;}
@@ -94,6 +96,12 @@ public class GuideMediaTest {
   ValueAnimator.enabled=false;before=ValueAnimator.starts;pro.show(0,0,true);check(before==ValueAnimator.starts,"disabled animation stays static");
   ValueAnimator.enabled=true;GuideMedia custom=new GuideMedia(c);custom.show(9,0,false);before=ValueAnimator.starts;custom.show(9,0,false);
   check(ValueAnimator.starts==before,"custom lesson does not restart on refresh");custom.onDetachedFromWindow();
+  for(boolean penPro:new boolean[]{false,true})for(int page=0;page<6;page++){
+   GuideMedia handwriting=new GuideMedia(c);handwriting.show(4,page,penPro);LottieAnimationView lesson=nativeView(handwriting);
+   lesson.drawImageLayer();check("img/".equals(lesson.imageFolder),"handwriting images must use official assets directory");
+   handwriting.stop();handwriting.show(4,page,penPro);lesson.drawImageLayer();handwriting.onDetachedFromWindow();
+   check(!lesson.running,"handwriting animation survived detach");
+  }
   System.out.println("GuideMedia pause/resume, playback failure, async failure, missing Pro image and reduced motion PASS");
  }
 }''',

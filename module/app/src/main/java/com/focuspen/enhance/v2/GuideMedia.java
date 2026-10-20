@@ -30,6 +30,9 @@ final class GuideMedia extends FrameLayout {
             Class<?> type=c.getClassLoader().loadClass("com.airbnb.lottie.LottieAnimationView");
             animation=(View)type.getConstructor(Context.class).newInstance(c);
             installFailureListener(animation);
+            // Match stylus_guide_full_layout: the selection lesson uses img/img_0.png.
+            // Image layers resolve during drawing, after the composition failure callback.
+            if(topic==4)type.getMethod("setImageAssetsFolder",String.class).invoke(animation,"img/");
             if(pro&&topic!=4){
                 Object delegate=c.getClassLoader().loadClass("t3.d").getConstructor(Context.class).newInstance(c);
                 de.robv.android.xposed.XposedHelpers.callMethod(animation,"setImageAssetDelegate",delegate);
