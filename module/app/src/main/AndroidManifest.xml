@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      FocusPen Enhancement - LSPosed module.
+      Configuration is embedded in SecurityCore's native stylus settings page.
+
+      Permissions: only the two normal-level (auto-granted, no user prompt) permissions that a
+      foreground service of type specialUse strictly requires on targetSdk 34+. Without them
+      startForeground() throws SecurityException / MissingForegroundServiceTypeException.
+      SYSTEM_ALERT_WINDOW and other dangerous permissions are deliberately NOT requested yet.
+    -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+
+    <queries>
+        <package android:name="com.miui.notes" />
+        <package android:name="com.miui.creation" />
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <package android:name="com.miui.securitycore" />
+        <package android:name="com.android.systemui" />
+        <package android:name="com.xiaomi.touchservice" />
+    </queries>
+
+    <application
+        android:label="焦点笔增强"
+        android:icon="@mipmap/ic_launcher"
+        android:hasCode="true"
+        android:allowBackup="false"
+        android:supportsRtl="true">
+        <activity android:name=".ManagerActivity" android:exported="true" android:label="焦点笔增强"
+            android:theme="@style/Theme.FocusPen.Manager" android:resizeableActivity="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+        <!-- ===== Legacy markers retained for older LSPosed compatibility ===== -->
+        <meta-data
+            android:name="xposedmodule"
+            android:value="true" />
+        <meta-data
+            android:name="xposedminversion"
+            android:value="82" />
+        <meta-data
+            android:name="xposeddescription"
+            android:value="焦点笔增强：快捷环、笔尖预览、按键与应用快捷操作" />
+
+        <!-- ===== Foreground service (module-side runtime work) ===== -->
+        <service
+            android:name=".FocusPenService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="LSPosed module runtime companion for stylus enhancement" />
+        </service>
+
+        <receiver android:name=".ConfigCommandReceiver" android:exported="false" />
+
+        <!-- Reads authorize the Binder UID and attribution package. Writes stay in this app. -->
+        <provider
+            android:name=".ConfigProvider"
+            android:authorities="com.focuspen.enhance.v2.config"
+            android:exported="true"
+            android:enabled="true" />
+
+    </application>
+
+</manifest>

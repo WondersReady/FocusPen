@@ -1,0 +1,4 @@
+# FocusPen automatic pen application catalog, version 1
+# Package identities verified on piano OS4.0.2.0.XPYCNXM, 2026-10-19.
+com.miui.notes
+com.miui.creation

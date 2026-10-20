@@ -1,0 +1,10 @@
+**/.gradle/
+**/build/
+**/local.properties
+**/*.apk
+**/*.keystore
+**/*.jks
+**/__pycache__/
+.idea/
+.vscode/
+work/
