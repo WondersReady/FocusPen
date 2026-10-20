@@ -262,7 +262,14 @@ final class PenPresentation {
             @Override protected void afterHookedMethod(MethodHookParam p){latchMotion(p.thisObject,false);}
         }));
         installed.add(XposedHelpers.findAndHookMethod(type,"fade",int.class,new XC_MethodHook(){
-            @Override protected void beforeHookedMethod(MethodHookParam p){latched=false;latchMotion(p.thisObject,false);session++;PenMouse.exit();}
+            @Override protected void beforeHookedMethod(MethodHookParam p){
+                // The system fades the laser when the pointer crosses a system
+                // surface (for example the status bar). That is not a mouse-mode
+                // exit; the mouse session owns its visual until the user toggles
+                // it off or the focused window becomes invalid.
+                if(mouseVisual){p.setResult(null);return;}
+                latched=false;latchMotion(p.thisObject,false);session++;PenMouse.exit();
+            }
         }));
         installed.add(XposedHelpers.findAndHookMethod(view,"setKeepPath",boolean.class,new XC_MethodHook(){
             @Override protected void afterHookedMethod(MethodHookParam p){if(enabled())tag((View)p.thisObject);}

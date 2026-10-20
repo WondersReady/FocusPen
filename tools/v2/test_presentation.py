@@ -173,6 +173,7 @@ public class PresentationTest {
   setup();int prior=pro.requests;begin(3,10);check(pro.requests==prior,"standard mouse enabled Pro hardware pipeline");end(10);
   setup();begin(8,20);pro.mHandler.drain();c.mHandler.drain();check(pro.setting==1&&c.starts==1,"Pro mouse skipped virtual laser pipeline");
   check(c.officialLongs==0&&!c.mLaserState.mKeepPath,"mouse startup started annotation");end(20);check(pro.setting==0&&c.stops==1,"exit did not close virtual laser");
+  setup();begin(8,21);call("fade",0);check(PenMouse.on&&c.mLaserState.mPresentationVisible,"system fade incorrectly exited mouse mode");end(21);
   setup();begin(8,30);end(30);pro.mHandler.drain();c.mHandler.drain();check(pro.setting==0&&c.starts==0,"queued enable revived canceled mouse");
   setup();begin(8,40);pro.mHandler.drain();end(40);call("turnonvirtuallaser");c.mHandler.drain();check(!c.mLaserState.mPresentationVisible,"late observer revived canceled mouse");
   XposedHelpers.callMethod(pro,"enableVirtualLaser");pro.mHandler.drain();c.mHandler.drain();check(c.officialLongs==1,"cancellation blocked later explicit official activation");
