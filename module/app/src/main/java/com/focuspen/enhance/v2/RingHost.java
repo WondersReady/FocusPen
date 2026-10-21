@@ -381,14 +381,20 @@ final class RingHost {
         }
         @Override public boolean onTouchEvent(MotionEvent e) {
             if (!session.active() || e.getDownTime() < opened) return false;
-            if (e.getActionMasked() == MotionEvent.ACTION_DOWN) {
+            int action = e.getActionMasked();
+            if (action == MotionEvent.ACTION_DOWN) {
                 String id = hit(e.getX(), e.getY());
                 if (id != null) { if (session.select(id)) focusChanged(); }
                 else { close(true); return true; }
                 pointPressed = true; pressedId = id; pressedUntil = SystemClock.uptimeMillis() + 180;
                 ripple(e.getX(), e.getY());
             }
-            if (e.getActionMasked() == MotionEvent.ACTION_UP && pointPressed) {
+            if (action == MotionEvent.ACTION_POINTER_DOWN || (action == MotionEvent.ACTION_MOVE
+                    && pointPressed && !java.util.Objects.equals(pressedId, hit(e.getX(), e.getY())))) {
+                pointPressed = false; pressedId = null; pressedUntil = 0;
+                if (session.select(null)) focusChanged();
+            }
+            if (action == MotionEvent.ACTION_UP && pointPressed) {
                 String id = hit(e.getX(), e.getY());
                 if (id != null && id.equals(pressedId)) {
                     performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK);
@@ -402,7 +408,7 @@ final class RingHost {
                     }
                 }
             }
-            if (e.getActionMasked() == MotionEvent.ACTION_UP || e.getActionMasked() == MotionEvent.ACTION_CANCEL) {
+            if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
                 pointPressed = false;
                 if (session.active()) { pressedId = null; pressedUntil = 0; }
             }
