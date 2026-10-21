@@ -11,9 +11,20 @@ final class GuideContent {
     record Step(String title,String text,String detail) { }
     static Context host(Context c)throws android.content.pm.PackageManager.NameNotFoundException{return c.getPackageName().equals("com.miui.securitycore")?c:c.createPackageContext("com.miui.securitycore",0);}
     static Step[] steps(Context c,int topic,boolean pro,ConfigSnapshot s){
-        if(topic==4)try{Context host=host(c);String[] keys={"hand_write","delete_word","select_word","insert_blank","new_line","insert_word"};Step[] lessons=new Step[keys.length];
-            for(int i=0;i<keys.length;i++){int title=host.getResources().getIdentifier("guide_"+keys[i]+"_title","string","com.miui.securitycore"),tip=host.getResources().getIdentifier("guide_"+keys[i]+"_tip","string","com.miui.securitycore");lessons[i]=new Step(host.getString(title),host.getString(tip),"使用系统随手写支持的文本框，按图示操作。");}return lessons;
-        }catch(Exception ignored){}
+        if(topic==4){
+            Step[] lessons=steps(topic,pro,s);
+            try{
+                Context host=host(c);String[] keys={"hand_write","delete_word","select_word","insert_blank","new_line","insert_word"};
+                for(int i=0;i<keys.length;i++){
+                    try{
+                        int title=host.getResources().getIdentifier("guide_"+keys[i]+"_title","string","com.miui.securitycore");
+                        int tip=host.getResources().getIdentifier("guide_"+keys[i]+"_tip","string","com.miui.securitycore");
+                        if(title!=0&&tip!=0)lessons[i]=new Step(host.getString(title),host.getString(tip),lessons[i].detail());
+                    }catch(Exception ignored){}
+                }
+            }catch(Exception ignored){}
+            return lessons;
+        }
         return steps(topic,pro,s);
     }
     static String animation(int topic,int step,boolean pro){
@@ -52,8 +63,9 @@ final class GuideContent {
                 new Step("直接在输入框书写","开启系统随手写后，用笔在支持的输入框中书写，系统会将手写转换为文字。","随手写与息屏灵感速记是不同功能。"),
                 new Step("删除文字","在要删除的文字上来回涂抹，即可删除对应内容。","使用系统随手写支持的输入框。"),
                 new Step("选择文字","在文字上画横线或圈选，选中后继续编辑。","手势识别由系统手写输入提供。"),
-                new Step("插入文字","在需要插入的位置停顿或使用插入手势，再开始书写。","具体支持范围以当前系统输入法为准。"),
-                new Step("分隔与合并","在文字之间画竖线，插入空格或移除已有空格。","若应用不支持，仍可使用输入法的常规编辑功能。")};
+                new Step("插入空格","在文字之间使用插入空格手势。","具体支持范围以当前系统输入法为准。"),
+                new Step("换行","在需要换行的位置使用换行手势。","若应用不支持，仍可使用输入法的常规编辑功能。"),
+                new Step("插入文字","在需要插入的位置使用插入手势，再开始书写。","具体支持范围以当前系统输入法为准。")};
             case 5 -> new Step[]{
                 new Step("用激光指示重点",pro?"将轻捏组合设为“开启虚拟激光”，使用该手势进入演示。":"按住焦点键显示激光；若选择“按住切换”，长按一次开启，再长按一次关闭。",pro?"双击笔身退出演示。":"短按焦点键可切换到画笔圈注。"),
                 new Step("圈画重点",pro?"使用官方演示手势进行圈注。":"圈注模式中，按住焦点键绘画，松开停止；双击清除笔迹。","激光的保持开启设置不会让松开后的画笔继续绘画。"),

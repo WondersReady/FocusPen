@@ -27,6 +27,7 @@ bash tools/v2/test_pro.sh
 python3 tools/v2/test_presentation.py
 bash tools/v2/test_motion.sh
 python3 tools/v2/test_guide_media.py
+python3 tools/v2/test_guide_content.py
 python3 tools/v2/test_menu_drag.py
 ```
 
