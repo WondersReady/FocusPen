@@ -88,6 +88,7 @@ final class GuideDemo extends Dialog implements ConfigClient.Listener {
                     .setInterpolator(new android.view.animation.PathInterpolator(.22f,.8f,.2f,1)).start();
         }
         client.add(this);
+        syncMedia();
     }
     @Override protected void onStop(){client.remove(this);for(GuideMedia media:pages)media.stop();super.onStop();}
     @Override public void dismiss(){
