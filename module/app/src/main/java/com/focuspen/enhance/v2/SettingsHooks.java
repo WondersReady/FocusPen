@@ -120,14 +120,6 @@ final class SettingsHooks {
                 AppRowStyle.bind(row,key!=null&&(key.startsWith(PREFIX+"add.")||key.startsWith(PREFIX+"pick.")));
                 if (key != null && key.startsWith(PREFIX + "guide.card."))
                     GuideNative.card(p.thisObject, p.args[0], Integer.parseInt(key.substring(key.lastIndexOf('.') + 1)));
-                if ((PREFIX+"content.preview").equals(key)) {
-                    android.view.ViewGroup root=(android.view.ViewGroup)XposedHelpers.getObjectField(p.args[0],"itemView");
-                    if(root.getChildCount()==1&&root.getChildAt(0) instanceof RingEditorView editor&&editor.contentValue.equals(currentContent().encode()))return;
-                    Context c=root.getContext();root.removeAllViews();root.setPadding(0,0,0,0);root.setMinimumHeight(0);
-                    root.setContentDescription(null);root.setClickable(false);root.setFocusable(false);
-                    root.setImportantForAccessibility(android.view.View.IMPORTANT_FOR_ACCESSIBILITY_NO);
-                    root.addView(new RingEditorView(c,currentContent(),page->openPage(c,page),(id,position)->edit(c,ConfigSpec.CONTENT,currentContent().position(id,position).encode())),new android.view.ViewGroup.LayoutParams(-1,-2));
-                }
             }
         });
         register(cl.loadClass("com.miui.widget.SpeedSeekBarPreference"), "onBindViewHolder", holder, new XC_MethodHook() {
@@ -406,7 +398,7 @@ final class SettingsHooks {
                 case "ring": {
                     toggle(b, group, ConfigSpec.RING, "启用弧形菜单", "弹出时取笔尖位置与朝向；点击图标执行，点击浮窗外取消");
                     information(c, group, "ring.material", "跟随系统材质", "使用应用侧边栏的系统材质设置，自动适配明暗与高级材质状态");
-                    navigation(c, group, "content", "菜单内容", "点击圆环上的图标编辑，最多 12 项");
+                    navigation(c, group, "content", "菜单内容", "选择项目并拖动排序，最多 12 项");
                     Object preview = preference(c, "miuix.preference.TextPreference", "ring.try", "试用弧形菜单", "点选项目可执行对应功能");
                     listener(preview, "setOnPreferenceClickListener", args -> {
                         Bundle reply = c.getContentResolver().call(ConfigProvider.URI, "previewRing", null, null);
@@ -529,13 +521,7 @@ final class SettingsHooks {
         RingContent content = RingContent.parse(s.text(ConfigSpec.CONTENT));
         AppProfiles profiles = AppProfiles.parse(s.text(ConfigSpec.PROFILES));
         Object group = category(c,screen,"management",title(page));
-        if (page.equals("content")) {
-            call(group,"setTitle","排列菜单项目");
-            Object preview=preference(c,"androidx.preference.Preference","content.preview",null,null);
-            call(preview,"setLayoutResource",android.R.layout.simple_list_item_2);call(preview,"setSelectable",false);add(group,preview);if(refreshing!=null)call(preview,"notifyChanged");
-            information(c,group,"content.hint",content.items.size()==12?"已添加 12 项":"点击 ＋ 添加项目",
-                    "拖动图标调整顺序，轻点更换内容或移除。\n此处从顶部按顺时针排列，实际菜单按项目数量展开。");
-        } else if(page.equals("addContent")||page.equals("selectContent")) {
+        if (page.equals("content")||page.equals("addContent")||page.equals("selectContent")) {
             menuPicker(fragment,c,screen,group,b,content);
         } else if(page.startsWith("position:")) {
             String id=page.substring(9);RingContent.Item item=content.find(id);
@@ -691,7 +677,7 @@ final class SettingsHooks {
                         ()->edit(c,ConfigSpec.PROFILES,currentProfiles().set(pkg,field,value).encode()));
             }
         }
-        if(!page.equals("addContent")&&!page.equals("selectContent"))rebuildOnChange(fragment,page,b);
+        if(!page.equals("content")&&!page.equals("addContent")&&!page.equals("selectContent"))rebuildOnChange(fragment,page,b);
     }
     private static RingContent currentContent() { return RingContent.parse(config.get().text(ConfigSpec.CONTENT)); }
     private static void menuPicker(Object fragment,Context c,Object screen,Object selected,Binding b,RingContent initial)throws Exception {
@@ -709,6 +695,7 @@ final class SettingsHooks {
             Object row=menuChoice(c,chosen?selected:RingContent.isAction(id)?official:apps,id,chosen);
             call(row,"setOrder",chosen?initial.items.indexOf(initial.find(id)):rows.size());rows.put(id,row);
         }
+        call(official,"setVisible",hasUnselectedOfficial(initial));
         final String[] previous={initial.encode()};
         b.updates.add(snapshot->{
             String value=snapshot.text(ConfigSpec.CONTENT);if(value.equals(previous[0]))return;
@@ -736,8 +723,14 @@ final class SettingsHooks {
                 alphabetical++;
             }
             previous[0]=value;
+            call(official,"setVisible",hasUnselectedOfficial(next));
             refreshList(fragment);
         });
+    }
+    private static boolean hasUnselectedOfficial(RingContent content){
+        for(String id:new String[]{RingContent.NOTES,RingContent.CREATION,RingContent.SCREENSHOT,RingContent.RECOGNITION})
+            if(content.find(id)==null)return true;
+        return false;
     }
     private static Object menuChoice(Context c,Object group,String id,boolean selected)throws Exception{
         Object choice=preference(c,"miuix.preference.CheckBoxPreference","pick."+id,MenuEntry.label(c,id),MenuEntry.available(c,id)?null:"目标暂不可用");
@@ -967,7 +960,8 @@ final class SettingsHooks {
     private static String parent(String p) {
         if(p==null) return null;
         if(p.equals("content")) return "ring";
-        if(p.equals("addContent") || p.startsWith("item:")) return "content";
+        if(p.equals("addContent")) return "ring";
+        if(p.startsWith("item:")) return "content";
         if(p.equals("selectContent"))return "content";
         if(p.startsWith("replace:"))return "item:"+p.substring(8);
         if(p.startsWith("position:"))return "item:"+p.substring(9);
@@ -999,7 +993,7 @@ final class SettingsHooks {
         switch (p) {
             case "ring": return "弧形菜单"; case "preview": return "笔尖预览"; case "keys": return "全局按键设置";case "pro":return "焦点笔 Pro";
             case "rules": return "应用配置文件"; case "guide": return "使用指南";
-            case "content": return "菜单内容"; case "addContent": return "选择项目内容";
+            case "content": case "addContent": return "菜单内容";
             case "addProfile": return "添加应用配置"; case "official": return "灵感速记";
             case "templates": return "配置模板"; case "addTemplate": return "创建模板";
             case "debug":return "界面预览机型";
