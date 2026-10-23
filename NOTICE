@@ -1,0 +1,14 @@
+FocusPen / 焦点笔增强
+Copyright 2026 WondersReady and FocusPen contributors.
+
+本项目原创部分使用 Apache License 2.0（见 LICENSE）。此授权仅适用于本项目有权授权的原创贡献，不授予第三方材料的权利。
+
+ROM 衍生部分（不属于上述 Apache-2.0 授权范围）：
+- module/app/src/main/java/com/focuspen/enhance/v2/PortedLaserView.java 的系统 LaserView 移植实现
+- module/app/src/main/res/drawable/focuspen_port_laser_pen.xml
+- module/app/src/main/res/values/focuspen_port_laser.xml
+- PenPresentation.java 中移植的 LaserPointerController 蓝牙模式通信片段
+这些部分来自测试设备的 Xiaomi HyperOS，版权归原权利人。本仓库未取得明确再分发许可；公开源码与署名不等于获得该许可。本项目的 Apache-2.0 声明不得用于宣称上述材料已获开源授权。
+
+教程中的官方图像与动画在运行时从设备已安装系统应用读取，未打包原始系统 APK 或原始动画文件。
+依赖及参考项目的许可与来源见 module/app/src/main/assets/open-source-notices.txt。

@@ -8,3 +8,7 @@
 .idea/
 .vscode/
 work/
+
+**/*.p12
+**/*.pem
+**/*.key

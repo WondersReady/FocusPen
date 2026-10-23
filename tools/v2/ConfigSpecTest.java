@@ -3,10 +3,11 @@ package com.focuspen.enhance.v2;
 /** Boundary and malformed-IPC inputs, independent of Android and host preferences. */
 public final class ConfigSpecTest {
     public static void main(String[] args) {
-        ConfigSpec.validate("longPressMs", 150);
-        ConfigSpec.validate("longPressMs", 800);
-        reject("longPressMs", 149); reject("longPressMs", 801);
-        reject("longPressMs", "200"); reject("enabled", 1);
+        for (int timing : new int[]{150, 250, 350}) ConfigSpec.validate(ConfigSpec.TIMING, timing);
+        reject(ConfigSpec.TIMING, 149); reject(ConfigSpec.TIMING, 200);
+        reject(ConfigSpec.TIMING, 351); reject(ConfigSpec.TIMING, "250");
+        reject(ConfigSpec.LONG_PRESS, 200); reject(ConfigSpec.DOUBLE_PRESS, 280);
+        reject("enabled", 1);
         reject("enabled", "true"); reject("confirmMode", "unknown");
         reject("schemaVersion", 100); reject("revision", 0);
         reject("enabled", null); reject(null, true);
@@ -16,7 +17,11 @@ public final class ConfigSpecTest {
             if(!"none".equals(ConfigSpec.DEFAULTS.get(key)))throw new AssertionError("Short press must default to none");
         for(String key:ConfigSpec.PRO_GESTURES){ConfigSpec.validate(key,"ring");reject(key,"bogus");}
         ConfigSpec.validate("button3Short","native"); ConfigSpec.validate("button1Double","note");
-        reject("doublePressMs",179); reject("doublePressMs",451);
+        for (int[] item : new int[][]{{150,150},{199,150},{200,250},{250,250},
+                {300,250},{301,350},{350,350},{800,350}})
+            if (ConfigSpec.timingFromLegacy(item[0]) != item[1]) throw new AssertionError("Legacy timing midpoint");
+        if (ConfigSpec.timingFromLegacy(null) != 250 || ConfigSpec.timingFromLegacy(801) != 250)
+            throw new AssertionError("Missing legacy timing must use standard");
         reject("button4Short", "ring"); reject("button2Long", "unknown");
         ConfigSpec.validate("ringMaterial", "texture"); ConfigSpec.validate("ringMaterial", "glass");
         reject("ringMaterial", "unknown"); reject("ringMaterial", true);
@@ -98,12 +103,16 @@ public final class ConfigSpecTest {
         }
         try { p.copy("com.example.missing",target); throw new AssertionError("Missing source accepted"); }
         catch(IllegalArgumentException expectedFailure) { }
-        AppProfiles full=AppProfiles.parse(AppProfiles.EMPTY);
-        for(int i=0;i<100;i++) full=full.set("com.example.app"+i,0,"note");
-        full=full.copy("com.example.app0","com.example.app99");
-        if(full.profiles.size()!=100) throw new AssertionError("Replacing at capacity changed profile count");
-        try { full.copy("com.example.app0",fresh); throw new AssertionError("Copy exceeded application capacity"); }
-        catch(IllegalArgumentException expectedFailure) { }
+        AppProfiles many=AppProfiles.parse(AppProfiles.EMPTY);
+        for(int i=0;i<150;i++) many=many.select("com.example.app"+i,"default","");
+        many=AppProfiles.parse(many.encode()).copy("com.example.app0","com.example.app149");
+        if(many.profiles.size()!=150) throw new AssertionError("Replacing changed profile count");
+        many=many.copy("com.example.app0",fresh);
+        if(many.profiles.size()!=151 || many.find(fresh)==null)
+            throw new AssertionError("Application picker retained an arbitrary 100-profile limit");
+        try { AppProfiles.parse("v4"+"x".repeat(AppProfiles.MAX_SERIALIZED_LENGTH));
+            throw new AssertionError("Oversized profile payload accepted");
+        } catch(IllegalArgumentException expectedFailure) { }
     }
     private static void profileTogglePreservesCustomValues() {
         String pkg="com.example.saved";

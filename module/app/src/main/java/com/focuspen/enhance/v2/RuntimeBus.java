@@ -14,7 +14,7 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 
 /** Authenticated endpoint directory in the module; event traffic uses one-way Binder calls. */
-final class RuntimeBus {
+final class RuntimeBus implements AutoCloseable {
     static final String UI = "com.android.systemui", INPUT = "android", MOTION = "com.xiaomi.touchservice";
     static final String REGISTER = "registerRuntime", DESCRIPTOR = "com.focuspen.enhance.v2.Runtime.v1";
     private static final int EVENT = IBinder.FIRST_CALL_TRANSACTION;
@@ -23,9 +23,11 @@ final class RuntimeBus {
     static final String SETTINGS = "com.miui.securitycore";
     private volatile ConcurrentHashMap<String, IBinder> peers = new ConcurrentHashMap<>();
     private final Context context;
+    private final HandlerThread thread;
     final Handler worker;
     private final IBinder endpoint;
     private final Runnable heartbeat;
+    private volatile boolean closed;
 
     static synchronized Bundle register(String host, Bundle request) {
         if (!UI.equals(host) && !INPUT.equals(host) && !MOTION.equals(host) && !SETTINGS.equals(host)) throw new SecurityException("Runtime host required");
@@ -54,10 +56,10 @@ final class RuntimeBus {
         context = c;
         int uiUid = c.getPackageManager().getApplicationInfo(UI, 0).uid;
         int moduleUid = c.getPackageManager().getApplicationInfo(BuildConfig.APPLICATION_ID, 0).uid;
-        HandlerThread thread = new HandlerThread("FocusPenRuntime"); thread.start(); worker = new Handler(thread.getLooper());
+        thread = new HandlerThread("FocusPenRuntime"); thread.start(); worker = new Handler(thread.getLooper());
         endpoint = new Binder() {
             @Override protected boolean onTransact(int code, Parcel data, Parcel reply, int flags) {
-                if (code != EVENT) return false;
+                if (closed || code != EVENT) return false;
                 int uid = Binder.getCallingUid();
                 if (uid != Process.SYSTEM_UID && uid != uiUid && uid != moduleUid) return false;
                 try {
@@ -69,7 +71,7 @@ final class RuntimeBus {
                         // Avoid waiting behind heartbeat and other runtime events here.
                         receiver.accept(event, payload);
                     } else {
-                        worker.post(() -> { try { receiver.accept(event, payload); } catch (Throwable e) { Log.w("FocusPenRuntime", "Rejected runtime event", e); } });
+                        worker.post(() -> { if (closed) return; try { receiver.accept(event, payload); } catch (Throwable e) { Log.w("FocusPenRuntime", "Rejected runtime event", e); } });
                     }
                     return true;
                 } catch (Throwable e) { return false; }
@@ -77,6 +79,7 @@ final class RuntimeBus {
         };
         heartbeat = new Runnable() {
             @Override public void run() {
+                if (closed) return;
                 try {
                     Bundle request = new Bundle(); request.putBinder("endpoint", endpoint);
                     request.putString("version", BuildConfig.VERSION_NAME);
@@ -94,16 +97,18 @@ final class RuntimeBus {
                     // Authenticated Binder references remain valid during a directory refresh
                     // failure; process death is checked below and on every transaction.
                 }
-                worker.postDelayed(this, 2000);
+                if (!closed) worker.postDelayed(this, 2000);
             }
         };
         worker.post(heartbeat);
     }
     boolean available(String host) {
+        if (closed) return false;
         IBinder peer = peers.get(host);
         return peer != null && peer.isBinderAlive();
     }
     boolean send(String host, String event, Bundle payload) {
+        if (closed) return false;
         IBinder peer = peers.get(host);
         if (peer == null || !peer.isBinderAlive()) return false;
         boolean sent = transmit(peer, event, payload);
@@ -118,5 +123,12 @@ final class RuntimeBus {
             return peer.transact(EVENT, data, null, IBinder.FLAG_ONEWAY);
         } catch (Throwable e) { return false; }
         finally { data.recycle(); }
+    }
+    @Override public void close() {
+        if (closed) return;
+        closed = true;
+        worker.removeCallbacks(heartbeat);
+        peers = new ConcurrentHashMap<>();
+        thread.quitSafely();
     }
 }

@@ -1,119 +1,356 @@
 package com.focuspen.enhance.v2;
 
-import android.content.Context;
-import android.graphics.Rect;
-import android.graphics.Region;
 import android.os.Handler;
-import android.os.SystemClock;
-import android.view.InputDevice;
-import android.view.KeyEvent;
-import android.view.MotionEvent;
 import android.util.Log;
+import android.view.KeyEvent;
 import java.util.HashMap;
+import java.util.Iterator;
+import java.util.LinkedHashSet;
 import java.util.Map;
-import java.util.function.Predicate;
-import java.util.function.Supplier;
-import de.robv.android.xposed.XposedHelpers;
+import java.util.Objects;
+import java.util.function.BooleanSupplier;
 
-/** One targeted SOURCE_MOUSE session for both pens. All injection is on the runtime worker. */
+/** Owns only the module's platform mouse device; every device call runs on its worker. */
 final class PenMouse {
+    interface Opener { SystemMouseDevice open(int sourceDevice) throws Exception; }
+
+    private static final String TAG = "FocusPenMouse";
     private static volatile PenMouse instance;
-    private final Handler worker;
-    private final NativeKeyReplay replay;
-    private final Supplier<KeyTarget> capture;
-    private final Predicate<KeyTarget> current;
-    private final MouseButtons buttons=new MouseButtons();
-    private record Press(KeyEvent event,long session,int button) { }
-    private final Map<Integer,Press> owned=new HashMap<>();
-    private volatile boolean active;
-    private volatile long generation;
-    private long visualSession;
-    private KeyTarget target;
-    private int uid,device;
-    private Rect frame;
-    private Region touch;
-    private volatile float nextX,nextY;
-    private float x,y;
-    private long downTime;
-    private boolean moveQueued;
-    private final Runnable watch=new Runnable(){public void run(){if(!active)return;if(!valid()||InputDevice.getDevice(device)==null){stop();return;}worker.postDelayed(this,150);}};
-    PenMouse(Handler worker,NativeKeyReplay replay,Supplier<KeyTarget> capture,Predicate<KeyTarget> current){this.worker=worker;this.replay=replay;this.capture=capture;this.current=current;instance=this;}
-    static boolean active(){PenMouse m=instance;return m!=null&&m.active;}
-    static long session(){PenMouse m=instance;return m==null?0:m.generation;}
-    static boolean isSession(long version){PenMouse m=instance;return m!=null&&m.active&&m.generation==version;}
-    static void enter(int device){PenMouse m=instance;if(m==null)return;
-        long version=m.generation;KeyTarget candidate=m.capture.get();
-        m.worker.post(()->m.begin(device,candidate,version));
-    }
-    static void exit(){PenMouse m=instance;if(m!=null)m.stop();}
-    static void move(float x,float y){PenMouse m=instance;if(m!=null)m.position(x,y);}
-    static void action(String action,boolean end,long version){PenMouse m=instance;if(m==null)return;m.worker.post(()->{
-        if(!end&&!m.valid()){if(version==m.generation)m.stop();return;}
-        synchronized(m){if(!m.active||version!=m.generation)return;
-        if(end){m.buttons.clear(m::send);return;}
-        int b=action.startsWith("right")?2:1;
-        if(action.equals("left")||action.equals("right")){m.press(b);if(!m.buttons.release(b,m::send))m.stop();}
-        else if(action.equals("leftHold")||action.equals("rightHold"))m.press(b);
-        else if(action.equals("scrollUp")||action.equals("scrollDown"))m.event(MotionEvent.ACTION_SCROLL,m.buttons.held(),0,action.equals("scrollUp")?3:-3);
-    }});}
-    static boolean key(KeyEvent e,int button){PenMouse m=instance;if(m==null)return false;synchronized(m.owned){
-        Press owner=m.owned.get(e.getKeyCode());
-        if(owner!=null&&owner.event.getDeviceId()==e.getDeviceId()&&owner.event.getDownTime()==e.getDownTime()){
-            if(e.getAction()==KeyEvent.ACTION_UP){m.owned.remove(e.getKeyCode());m.worker.post(()->{synchronized(m){if(m.active&&owner.session==m.generation&&!m.buttons.release(owner.button,m::send))m.stop();}});}return true;
+
+    private record KeyIdentity(int device, int key, long downTime) { }
+    private record KeyPress(KeyIdentity identity, int button, long session, long context) { }
+
+    private static final class Motion {
+        final long session;
+        final long context;
+        double dx;
+        double dy;
+
+        Motion(long session, long context, float dx, float dy) {
+            this.session = session;
+            this.context = context;
+            this.dx = dx;
+            this.dy = dy;
         }
-        if(!m.active||e.getAction()!=KeyEvent.ACTION_DOWN||e.getRepeatCount()!=0)return false;
-        long version=m.generation;m.owned.put(e.getKeyCode(),new Press(new KeyEvent(e),version,button));
-        m.worker.post(()->{if(!m.valid())return;synchronized(m){if(m.active&&version==m.generation)m.press(button);}});return true;
-    }}
-    private void begin(int inputDevice,KeyTarget candidate,long version){
-        if(active||generation!=version)return;
-        // A queued enter can precede the cleanup posted by exit. Release the old target first.
-        if(target!=null)cleanup();
-        try{
-            if(candidate==null||!current.test(candidate)||candidate.window()==null)return;
-            Object window=candidate.window();Object service=XposedHelpers.getObjectField(window,"mWmService");
-            synchronized(XposedHelpers.getObjectField(service,"mGlobalLock")){
-                if(!Boolean.TRUE.equals(XposedHelpers.callMethod(window,"isVisible"))||(Integer)XposedHelpers.callMethod(window,"getDisplayId")!=0)return;
-                frame=new Rect((Rect)XposedHelpers.callMethod(window,"getFrame"));touch=new Region();XposedHelpers.callMethod(window,"getTouchableRegion",touch);
-                uid=(Integer)XposedHelpers.callMethod(window,"getOwningUid");
+    }
+
+    private final Handler worker;
+    private final Opener opener;
+    private final BooleanSupplier allowed;
+    private final Runnable onStopped;
+    private final Object lock = new Object();
+    private final Map<Integer, KeyPress> keys = new HashMap<>();
+    private final LinkedHashSet<KeyIdentity> staleKeys = new LinkedHashSet<>();
+    private final Object[] buttonOwners = new Object[3]; // worker only
+    private final Object[] actionOwners = { null, new Object(), new Object() };
+    private SystemMouseDevice mouse; // worker only
+    private Motion pendingMotion;
+    private long generation;
+    private long context;
+    private boolean wanted;
+    private boolean active;
+
+    PenMouse(Handler worker, Opener opener, BooleanSupplier allowed) {
+        this(worker, opener, allowed, () -> { });
+    }
+
+    /** onStopped runs on the worker after an unexpected open/device/permission failure. */
+    PenMouse(Handler worker, Opener opener, BooleanSupplier allowed, Runnable onStopped) {
+        this.worker = Objects.requireNonNull(worker);
+        this.opener = Objects.requireNonNull(opener);
+        this.allowed = Objects.requireNonNull(allowed);
+        this.onStopped = Objects.requireNonNull(onStopped);
+        PenMouse previous = instance;
+        instance = this;
+        if (previous != null) previous.requestExit();
+    }
+
+    static boolean active() {
+        PenMouse m = instance;
+        if (m == null) return false;
+        synchronized (m.lock) { return m.wanted || m.active; }
+    }
+
+    static long session() {
+        PenMouse m = instance;
+        if (m == null) return 0;
+        synchronized (m.lock) { return m.generation; }
+    }
+
+    static boolean isSession(long version) {
+        PenMouse m = instance;
+        if (m == null) return false;
+        synchronized (m.lock) { return (m.wanted || m.active) && m.generation == version; }
+    }
+
+    static void enter(int sourceDevice) {
+        PenMouse m = instance;
+        if (m != null) m.requestEnter(sourceDevice);
+    }
+
+    static void exit() {
+        PenMouse m = instance;
+        if (m != null) m.requestExit();
+    }
+
+    static boolean key(KeyEvent event, int button) {
+        PenMouse m = instance;
+        return m != null && m.handleKey(event, button);
+    }
+
+    static void action(String action, boolean end, long version) {
+        PenMouse m = instance;
+        if (m != null) m.requestAction(action, end, version);
+    }
+
+    static void relative(float dx, float dy) {
+        PenMouse m = instance;
+        if (m != null) m.requestMotion(dx, dy);
+    }
+
+    static void contextChanged() {
+        PenMouse m = instance;
+        if (m != null) m.changeContext();
+    }
+
+    private void requestEnter(int sourceDevice) {
+        synchronized (lock) {
+            if (wanted || active) return;
+            wanted = true;
+            long version = ++generation;
+            worker.post(() -> begin(sourceDevice, version));
+        }
+    }
+
+    private void begin(int sourceDevice, long version) {
+        synchronized (lock) {
+            if (!wanted || generation != version) return;
+        }
+        SystemMouseDevice opened;
+        try {
+            if (!allowed.getAsBoolean()) throw new IllegalStateException("Mouse no longer allowed");
+            opened = Objects.requireNonNull(opener.open(sourceDevice));
+        } catch (Throwable failure) {
+            Log.w(TAG, "Cannot open system mouse", failure);
+            fail(version);
+            return;
+        }
+        synchronized (lock) {
+            if (wanted && generation == version) {
+                mouse = opened;
+                active = true;
+                return;
             }
-            if(frame.isEmpty()||uid<0)return;
-            synchronized(this){
-            if(active||generation!=version)return;
-            target=candidate;device=inputDevice;x=nextX=frame.exactCenterX();y=nextY=frame.exactCenterY();generation++;active=true;
-            visualSession=generation;
-            PenPresentation.mouseMode(true,device,visualSession,x,y);worker.post(watch);Log.i("FocusPenMouse","Entered device="+device+" target="+target.pkg());}
-        }catch(Throwable failure){Log.w("FocusPenMouse","Cannot enter",failure);stop();}
+        }
+        try { opened.close(); } catch (Throwable failure) { Log.w(TAG, "Cannot close canceled mouse", failure); }
     }
-    private void press(int b){if(buttons.held()==0)downTime=SystemClock.uptimeMillis();if(!buttons.press(b,this::send))stop();}
-    private boolean valid(){
-        if(!active||target==null||!current.test(target))return false;
-        try{Object window=target.window();Object service=XposedHelpers.getObjectField(window,"mWmService");
-            synchronized(XposedHelpers.getObjectField(service,"mGlobalLock")){
-                Region region=new Region();XposedHelpers.callMethod(window,"getTouchableRegion",region);
-                return frame.equals(XposedHelpers.callMethod(window,"getFrame"))&&touch.equals(region)
-                        &&Boolean.TRUE.equals(XposedHelpers.callMethod(window,"isVisible"))
-                        &&uid==(Integer)XposedHelpers.callMethod(window,"getOwningUid");
-            }}
-        catch(Throwable e){return false;}
+
+    private void requestExit() {
+        synchronized (lock) {
+            if (!wanted && !active) return;
+            wanted = false;
+            active = false;
+            generation++;
+            context++;
+            pendingMotion = null;
+            retireKeys();
+            worker.post(this::closeDevice);
+        }
     }
-    private void position(float px,float py){synchronized(this){
-        if(!active||!Float.isFinite(px)||!Float.isFinite(py))return;nextX=px;nextY=py;if(moveQueued)return;moveQueued=true;long version=generation;
-        worker.post(()->{if(!valid()){if(version==generation)stop();return;}synchronized(this){if(version!=generation)return;moveQueued=false;if(!active)return;x=nextX;y=nextY;
-            if(touch.contains((int)x,(int)y)) {if(!send(buttons.held()==0?MotionEvent.ACTION_HOVER_MOVE:MotionEvent.ACTION_MOVE,buttons.held(),0))stop();}
-            else if(buttons.held()!=0)stop();
-        }});
-    }}
-    private void stop(){synchronized(this){active=false;long version=++generation;moveQueued=false;worker.post(()->{synchronized(this){if(!active&&generation==version)cleanup();}});}}
-    private void cleanup(){buttons.clear(this::send);worker.removeCallbacks(watch);PenPresentation.mouseMode(false,device,visualSession,0,0);target=null;}
-    private boolean send(int action,int state,int changed){return event(action,state,changed,0);}
-    private boolean event(int action,int state,int changed,float scroll){
-        if(target==null)return false;
-        if((action==0||action==11)&&!touch.contains((int)x,(int)y))return false;
-        MotionEvent.PointerProperties p=new MotionEvent.PointerProperties();p.id=0;p.toolType=MotionEvent.TOOL_TYPE_MOUSE;
-        MotionEvent.PointerCoords c=new MotionEvent.PointerCoords();c.x=x;c.y=y;c.pressure=state==0?0:1;c.setAxisValue(MotionEvent.AXIS_VSCROLL,scroll);
-        MotionEvent e=MotionEvent.obtain(downTime,SystemClock.uptimeMillis(),action,1,new MotionEvent.PointerProperties[]{p},new MotionEvent.PointerCoords[]{c},0,state,1,1,-1,0,InputDevice.SOURCE_MOUSE,0);
-        try{XposedHelpers.callMethod(e,"setDisplayId",0);if(changed!=0)XposedHelpers.callMethod(e,"setActionButton",changed);replay.dispatchPointer(e,uid);return true;}
-        catch(Throwable failure){Log.w("FocusPenMouse","Pointer delivery failed",failure);return false;}finally{e.recycle();}
+
+    private void changeContext() {
+        synchronized (lock) {
+            if (!active) return;
+            long version = ++generation;
+            long epoch = ++context;
+            pendingMotion = null;
+            retireKeys();
+            worker.post(() -> {
+                if (current(version, epoch) && !releaseButtons()) fail(version);
+            });
+        }
+    }
+
+    private boolean handleKey(KeyEvent event, int button) {
+        if (button != 1 && button != 2) return false;
+        KeyIdentity identity = new KeyIdentity(event.getDeviceId(), event.getKeyCode(), event.getDownTime());
+        synchronized (lock) {
+            KeyPress old = keys.get(identity.key());
+            if (event.getAction() == KeyEvent.ACTION_UP) {
+                if (old != null && old.identity().equals(identity)) {
+                    keys.remove(identity.key());
+                    remember(identity);
+                    barrier();
+                    worker.post(() -> releaseKey(old));
+                    return true;
+                }
+                return staleKeys.contains(identity);
+            }
+            if (event.getAction() != KeyEvent.ACTION_DOWN || (!wanted && !active)) return false;
+            if (old != null && old.identity().equals(identity)) return true;
+            if (event.getRepeatCount() != 0) return true;
+            if (old != null) {
+                remember(old.identity());
+                worker.post(() -> releaseKey(old));
+            }
+            if (event.isCanceled()) return true;
+            KeyPress next = new KeyPress(identity, button, generation, context);
+            staleKeys.remove(identity);
+            keys.put(identity.key(), next);
+            barrier();
+            worker.post(() -> pressKey(next));
+            return true;
+        }
+    }
+
+    private void pressKey(KeyPress press) {
+        if (!ready(press.session(), press.context())) return;
+        pressButton(press.button(), press, press.session());
+    }
+
+    private void releaseKey(KeyPress press) {
+        if (!current(press.session(), press.context())) return;
+        releaseButton(press.button(), press, press.session());
+    }
+
+    private void requestAction(String action, boolean end, long version) {
+        synchronized (lock) {
+            if ((!wanted && !active) || generation != version) return;
+            long epoch = context;
+            barrier();
+            worker.post(() -> {
+                if (!ready(version, epoch)) return;
+                if (end) {
+                    releaseButton(1, actionOwners[1], version);
+                    releaseButton(2, actionOwners[2], version);
+                } else if ("left".equals(action) || "right".equals(action)) {
+                    int button = "left".equals(action) ? 1 : 2;
+                    Object owner = actionOwners[button];
+                    if (buttonOwners[button] == null) {
+                        pressButton(button, owner, version);
+                        releaseButton(button, owner, version);
+                    }
+                } else if ("leftHold".equals(action) || "rightHold".equals(action)) {
+                    int button = "leftHold".equals(action) ? 1 : 2;
+                    pressButton(button, actionOwners[button], version);
+                } else if ("scrollUp".equals(action) || "scrollDown".equals(action)) {
+                    try {
+                        if (!mouse.scroll("scrollUp".equals(action) ? 1f : -1f)) fail(version);
+                    } catch (Throwable failure) { deviceFailure(version, failure); }
+                }
+            });
+        }
+    }
+
+    private void requestMotion(float dx, float dy) {
+        if (!Float.isFinite(dx) || !Float.isFinite(dy) || (dx == 0 && dy == 0)) return;
+        synchronized (lock) {
+            if (!wanted && !active) return;
+            if (pendingMotion != null) {
+                pendingMotion.dx += dx;
+                pendingMotion.dy += dy;
+                return;
+            }
+            Motion motion = new Motion(generation, context, dx, dy);
+            pendingMotion = motion;
+            worker.post(() -> {
+                synchronized (lock) {
+                    if (pendingMotion == motion) pendingMotion = null;
+                }
+                if (!ready(motion.session, motion.context)) return;
+                if (!Double.isFinite(motion.dx) || !Double.isFinite(motion.dy)
+                        || Math.abs(motion.dx) > Float.MAX_VALUE
+                        || Math.abs(motion.dy) > Float.MAX_VALUE) return;
+                try {
+                    if (!mouse.move((float) motion.dx, (float) motion.dy)) fail(motion.session);
+                } catch (Throwable failure) { deviceFailure(motion.session, failure); }
+            });
+        }
+    }
+
+    private void barrier() { pendingMotion = null; }
+
+    private boolean current(long version, long epoch) {
+        synchronized (lock) { return active && generation == version && context == epoch; }
+    }
+
+    private boolean ready(long version, long epoch) {
+        if (!current(version, epoch)) return false;
+        try {
+            if (allowed.getAsBoolean()) return mouse != null;
+        } catch (Throwable failure) {
+            deviceFailure(version, failure);
+            return false;
+        }
+        fail(version);
+        return false;
+    }
+
+    private void pressButton(int button, Object owner, long version) {
+        if (buttonOwners[button] != null) return;
+        try {
+            if (!mouse.button(button, true)) { fail(version); return; }
+            buttonOwners[button] = owner;
+        } catch (Throwable failure) { deviceFailure(version, failure); }
+    }
+
+    private void releaseButton(int button, Object owner, long version) {
+        if (buttonOwners[button] != owner) return;
+        try {
+            if (!mouse.button(button, false)) { fail(version); return; }
+            buttonOwners[button] = null;
+        } catch (Throwable failure) { deviceFailure(version, failure); }
+    }
+
+    private boolean releaseButtons() {
+        boolean okay = true;
+        for (int button = 1; button <= 2; button++) {
+            if (buttonOwners[button] == null) continue;
+            try { if (mouse == null || !mouse.button(button, false)) okay = false; }
+            catch (Throwable failure) { Log.w(TAG, "Cannot release mouse button", failure); okay = false; }
+            buttonOwners[button] = null;
+        }
+        return okay;
+    }
+
+    private void closeDevice() {
+        releaseButtons();
+        SystemMouseDevice owned = mouse;
+        mouse = null;
+        if (owned != null) try { owned.close(); }
+        catch (Throwable failure) { Log.w(TAG, "Cannot close system mouse", failure); }
+    }
+
+    private void fail(long version) {
+        synchronized (lock) {
+            if (generation != version || (!wanted && !active)) return;
+            wanted = false;
+            active = false;
+            generation++;
+            context++;
+            pendingMotion = null;
+            retireKeys();
+        }
+        closeDevice();
+        try { onStopped.run(); } catch (Throwable failure) { Log.w(TAG, "Mouse stop callback failed", failure); }
+    }
+
+    private void deviceFailure(long version, Throwable failure) {
+        Log.w(TAG, "System mouse operation failed", failure);
+        fail(version);
+    }
+
+    private void retireKeys() {
+        for (KeyPress press : keys.values()) remember(press.identity());
+        keys.clear();
+    }
+
+    private void remember(KeyIdentity identity) {
+        staleKeys.add(identity);
+        while (staleKeys.size() > 64) {
+            Iterator<KeyIdentity> oldest = staleKeys.iterator();
+            oldest.next();
+            oldest.remove();
+        }
     }
 }

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Values from framework-ext-res.apk's laser resources (package 0x11). -->
+    <dimen name="focuspen_port_laser_in_radius">4dp</dimen>
+    <dimen name="focuspen_port_laser_out_blur">1.5dp</dimen>
+    <dimen name="focuspen_port_laser_out_blur_radius">8dp</dimen>
+    <dimen name="focuspen_port_laser_out_fill_radius">7.5dp</dimen>
+    <dimen name="focuspen_port_laser_out_width">3dp</dimen>
+    <item name="focuspen_port_laser_pen_center_x" type="dimen">0.129</item>
+    <item name="focuspen_port_laser_pen_center_y" type="dimen">0.865</item>
+    <dimen name="focuspen_port_laser_pen_height">32dp</dimen>
+    <dimen name="focuspen_port_laser_pen_path_width">3dp</dimen>
+    <dimen name="focuspen_port_laser_pen_width">32dp</dimen>
+</resources>

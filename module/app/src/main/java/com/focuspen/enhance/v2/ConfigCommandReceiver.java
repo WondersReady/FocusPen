@@ -10,7 +10,7 @@ import android.util.Log;
 public final class ConfigCommandReceiver extends BroadcastReceiver {
     @Override public void onReceive(Context c, Intent i) {
         try {
-            if (!"com.focuspen.enhance.v2.COMMIT".equals(i.getAction())
+            if (!ConfigProvider.ACTION_COMMIT.equals(i.getAction())
                     || i.getLongExtra("expires", -1) < SystemClock.elapsedRealtime() || i.getExtras() == null) return;
             if (!ConfigStore.write(c, i.getStringExtra("key"), i.getExtras().get("value")))
                 Log.w("FocusPenConfig", "Configuration commit failed");

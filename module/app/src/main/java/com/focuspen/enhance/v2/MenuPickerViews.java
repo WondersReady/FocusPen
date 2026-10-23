@@ -6,33 +6,107 @@ import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewTreeObserver;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import java.util.ArrayList;
 import java.util.WeakHashMap;
 import java.util.function.BiConsumer;
+import java.util.function.Supplier;
 
 /** Native rows stay in the list while being dragged; nearby rows make room in place. */
 final class MenuPickerViews {
-    private record Row(String id,int position){}
+    private static final class Row {
+        final String id;
+        int position;
+        Row(String id,int position){this.id=id;this.position=position;}
+    }
     private static final WeakHashMap<View,Row> rows=new WeakHashMap<>();
     private static long dragGeneration;
     private static Runnable cancelDrag;
-    static void bind(View root,String id,RingContent content,BiConsumer<String,Integer> move){
+    private static DropHandoff pendingDrop;
+    private static ViewGroup animatedList;
+
+    // MIUIX derives the card bounds from the first/last row's translated Y.
+    // Draw that shared background using layout coordinates; restore row transforms
+    // before RecyclerView draws its children, so only the rows move.
+    static java.util.Map<View,Float> beginGroupDraw(ViewGroup list){
+        if(list!=animatedList)return null;
+        java.util.Map<View,Float> offsets=new java.util.IdentityHashMap<>();
+        for(int i=0;i<list.getChildCount();i++){
+            View child=list.getChildAt(i);
+            if(rows.containsKey(child)&&child.getTranslationY()!=0){
+                offsets.put(child,child.getTranslationY());child.setTranslationY(0);
+            }
+        }
+        return offsets;
+    }
+    static void endGroupDraw(java.util.Map<View,Float> offsets){
+        if(offsets!=null)for(var entry:offsets.entrySet())entry.getKey().setTranslationY(entry.getValue());
+    }
+
+    /** Only a committed drag has already animated to its destination. */
+    static void beforeContentUpdate(View list){
+        if(pendingDrop!=null&&pendingDrop.list==list)pendingDrop.prepare();
+    }
+    static void afterContentUpdate(View list){
+        if(pendingDrop!=null&&pendingDrop.list==list)pendingDrop.layout();
+    }
+    private static final class DropHandoff implements ViewTreeObserver.OnPreDrawListener,View.OnAttachStateChangeListener {
+        final ViewGroup list;final ArrayList<View> views;final Runnable finished;
+        final Runnable timeout=this::finish;
+        final ViewTreeObserver observer;
+        Object animator;java.lang.reflect.Method setter;
+        boolean prepared,ready,done;
+        DropHandoff(ViewGroup list,ArrayList<View> views,Runnable finished){
+            this.list=list;this.views=new ArrayList<>(views);this.finished=finished;
+            observer=list.getViewTreeObserver();list.addOnAttachStateChangeListener(this);
+            list.postDelayed(timeout,1500);
+        }
+        void prepare(){
+            if(prepared||done)return;prepared=true;
+            try{
+                animator=list.getClass().getMethod("getItemAnimator").invoke(list);
+                for(java.lang.reflect.Method method:list.getClass().getMethods())
+                    if(method.getName().equals("setItemAnimator")&&method.getParameterCount()==1){setter=method;break;}
+                if(setter!=null)setter.invoke(list,new Object[]{null});
+            }catch(ReflectiveOperationException failure){android.util.Log.w("FocusPenSettings","Cannot pause menu reorder animator",failure);}
+            // Adapter positions will now represent the drag's settled visual positions.
+            reset(views);observer.addOnPreDrawListener(this);
+        }
+        void layout(){
+            if(!prepared||done)return;
+            // PreferenceGroup posts its adapter sort. Queue behind it before allowing
+            // a draw, then restore the normal animator after that layout has finished.
+            list.post(()->{if(!done){ready=true;list.requestLayout();list.invalidate();}});
+        }
+        public boolean onPreDraw(){if(!ready)return false;finish();return true;}
+        void finish(){
+            if(done)return;done=true;list.removeCallbacks(timeout);
+            if(observer.isAlive())observer.removeOnPreDrawListener(this);
+            list.removeOnAttachStateChangeListener(this);reset(views);
+            if(setter!=null)try{setter.invoke(list,animator);}catch(ReflectiveOperationException failure){android.util.Log.w("FocusPenSettings","Cannot restore menu animator",failure);}
+            if(pendingDrop==this)pendingDrop=null;finished.run();
+            if(animatedList==list)animatedList=null;
+        }
+        public void onViewAttachedToWindow(View v){}
+        public void onViewDetachedFromWindow(View v){finish();}
+    }
+    static void bind(View root,String id,Supplier<RingContent> content,BiConsumer<String,Integer> move){
         float density=root.getResources().getDisplayMetrics().density;
         root.animate().cancel();root.setTranslationY(0);root.setTranslationZ(0);
         if(!(root.findViewById(android.R.id.widget_frame) instanceof LinearLayout widget))return;
         View previous=widget.findViewWithTag("focuspen.reorder");if(previous!=null)widget.removeView(previous);
         root.setOnDragListener(null);root.setPressed(false);rows.remove(root);
-        RingContent.Item item=content.find(id);if(item==null)return;
-        int position=content.items.indexOf(item);Row binding=new Row(id,position);rows.put(root,binding);
+        RingContent current=content.get();RingContent.Item item=current.find(id);if(item==null)return;
+        Row binding=new Row(id,current.items.indexOf(item));rows.put(root,binding);
         TextView handle=new TextView(root.getContext());handle.setTag("focuspen.reorder");handle.setText("≡");handle.setTextSize(26);handle.setGravity(Gravity.CENTER);
         boolean dark=(root.getResources().getConfiguration().uiMode&48)==32;
         handle.setTextColor(dark?0xff959ba5:0xff858b96);handle.setContentDescription("拖动"+MenuEntry.label(root.getContext(),id)+"调整顺序");handle.setFocusable(true);
         widget.setOrientation(LinearLayout.HORIZONTAL);widget.setGravity(Gravity.CENTER_VERTICAL);
         widget.addView(handle,new LinearLayout.LayoutParams(Math.round(48*density),Math.round(52*density)));
         class DragGesture implements View.OnTouchListener,View.OnAttachStateChangeListener {
-            float startY,pointerY,grabY;boolean moving,tracking,settling;int destination;Drawable background;long generation;
+            float startY,pointerY,grabY;boolean moving,tracking,settling;int position,destination,itemCount;Drawable background;long generation;
             ViewGroup list;long lastFrame;float scrollRemainder;
             final int[] location=new int[2];
             final ArrayList<View> siblings=new ArrayList<>();
@@ -41,9 +115,12 @@ final class MenuPickerViews {
             final Runnable scrollFrame=this::scroll;
             public boolean onTouch(View v,MotionEvent e){
                 if(e.getActionMasked()==MotionEvent.ACTION_DOWN){
-                    if(settling||root.getParent()==null||rows.get(root)!=binding)return true;
+                    if(pendingDrop!=null||settling||root.getParent()==null||rows.get(root)!=binding)return true;
+                    RingContent latest=content.get();syncPositions(latest);
+                    if(binding.position<0)return true;
                     if(cancelDrag!=null)cancelDrag.run();cancelDrag=cancellation;
                     if(!(root.getParent() instanceof ViewGroup parent))return true;
+                    position=binding.position;itemCount=latest.items.size();
                     list=parent;tracking=true;generation=++dragGeneration;startY=pointerY=e.getRawY();moving=false;destination=position;
                     root.getLocationOnScreen(location);grabY=pointerY-location[1];list.requestDisallowInterceptTouchEvent(true);
                     siblings.clear();shifts.clear();collect();return true;
@@ -53,7 +130,7 @@ final class MenuPickerViews {
                 if(e.getActionMasked()==MotionEvent.ACTION_MOVE){
                     pointerY=e.getRawY();float delta=pointerY-startY;
                     if(!moving&&Math.abs(delta)>android.view.ViewConfiguration.get(v.getContext()).getScaledTouchSlop()){
-                        moving=true;background=root.getBackground();GradientDrawable lifted=new GradientDrawable();lifted.setColor(dark?0xff252527:0xffffffff);lifted.setCornerRadius(16*density);root.setBackground(lifted);root.setTranslationZ(8*density);
+                        moving=true;animatedList=list;background=root.getBackground();GradientDrawable lifted=new GradientDrawable();lifted.setColor(dark?0xff252527:0xffffffff);lifted.setCornerRadius(16*density);root.setBackground(lifted);root.setTranslationZ(8*density);
                         lastFrame=android.os.SystemClock.uptimeMillis();scrollRemainder=0;root.postOnAnimation(scrollFrame);
                     }
                     if(moving){
@@ -74,18 +151,26 @@ final class MenuPickerViews {
                             offset=(destination>position?child.getBottom()-root.getHeight():child.getTop())-root.getTop();}
                         root.animate().translationY(offset).setDuration(100).withEndAction(()->{
                             if(generation!=dragGeneration||rows.get(root)!=binding||!root.isAttachedToWindow())return;
+                            pendingDrop=new DropHandoff(list,siblings,()->{settling=false;if(cancelDrag==cancellation)cancelDrag=null;});
                             move.accept(id,destination);
-                            root.postDelayed(()->{if(generation==dragGeneration){reset(siblings);settling=false;if(cancelDrag==cancellation)cancelDrag=null;}},180);
                         }).start();
-                    }else {for(View child:siblings)child.animate().translationY(0).setDuration(140).start();if(cancelDrag==cancellation)cancelDrag=null;}
+                    }else {
+                        for(View child:siblings){
+                            child.animate().translationY(0).setDuration(140);
+                            if(child==root)child.animate().withEndAction(()->{if(generation==dragGeneration&&animatedList==list)animatedList=null;});
+                            child.animate().start();
+                        }
+                        if(cancelDrag==cancellation)cancelDrag=null;
+                    }
                     moving=false;return true;
                 }return true;
             }
             private void collect(){
                 // Scroll can attach new native rows. Never keep recycled rows in the drag set.
-                siblings.removeIf(child->child.getParent()!=list||!rows.containsKey(child));
+                siblings.removeIf(child->{Row info=rows.get(child);return child.getParent()!=list||info==null||info.position<0||info.position>=itemCount;});
                 shifts.keySet().retainAll(siblings);
-                for(int i=0;i<list.getChildCount();i++){View child=list.getChildAt(i);if(rows.containsKey(child)&&!siblings.contains(child))siblings.add(child);}
+                for(int i=0;i<list.getChildCount();i++){View child=list.getChildAt(i);Row info=rows.get(child);
+                    if(info!=null&&info.position>=0&&info.position<itemCount&&!siblings.contains(child))siblings.add(child);}
             }
             private void updatePosition(){
                 collect();list.getLocationOnScreen(location);
@@ -122,7 +207,7 @@ final class MenuPickerViews {
                     collect();float limit=Float.MAX_VALUE;
                     for(View child:siblings){Row info=rows.get(child);if(info==null)continue;
                         if(speed<0&&info.position==0)limit=Math.max(0,list.getPaddingTop()-child.getTop());
-                        if(speed>0&&info.position==content.items.size()-1)limit=Math.max(0,child.getBottom()-list.getHeight()+list.getPaddingBottom());
+                        if(speed>0&&info.position==itemCount-1)limit=Math.max(0,child.getBottom()-list.getHeight()+list.getPaddingBottom());
                     }
                     distance=Math.copySign(Math.min(Math.abs(distance+scrollRemainder),limit),speed);
                     int pixels=(int)distance;scrollRemainder=distance-pixels;
@@ -139,21 +224,30 @@ final class MenuPickerViews {
                 ++dragGeneration;
                 if(moving)root.setBackground(background);
                 moving=false;reset(siblings);
+                if(animatedList==list)animatedList=null;
                 if(root.getParent()!=null)root.getParent().requestDisallowInterceptTouchEvent(false);
             }
             public void onViewAttachedToWindow(View v){}
-            public void onViewDetachedFromWindow(View v){cancel();}
+            public void onViewDetachedFromWindow(View v){if(!settling)cancel();}
         }
         DragGesture gesture=new DragGesture();handle.setOnTouchListener(gesture);handle.addOnAttachStateChangeListener(gesture);
         handle.setAccessibilityDelegate(new View.AccessibilityDelegate(){
             public void onInitializeAccessibilityNodeInfo(View v,android.view.accessibility.AccessibilityNodeInfo info){super.onInitializeAccessibilityNodeInfo(v,info);
+                RingContent latest=content.get();syncPositions(latest);int position=binding.position;
                 if(position>0)info.addAction(new android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD,"向前移动"));
-                if(position<content.items.size()-1)info.addAction(new android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD,"向后移动"));}
+                if(position>=0&&position<latest.items.size()-1)info.addAction(new android.view.accessibility.AccessibilityNodeInfo.AccessibilityAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD,"向后移动"));}
             public boolean performAccessibilityAction(View v,int action,android.os.Bundle args){
+                RingContent latest=content.get();syncPositions(latest);int position=binding.position;
                 if(action==android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD&&position>0){move.accept(id,position-1);return true;}
-                if(action==android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD&&position<content.items.size()-1){move.accept(id,position+1);return true;}return super.performAccessibilityAction(v,action,args);
+                if(action==android.view.accessibility.AccessibilityNodeInfo.ACTION_SCROLL_FORWARD&&position>=0&&position<latest.items.size()-1){move.accept(id,position+1);return true;}return super.performAccessibilityAction(v,action,args);
             }
         });
+    }
+    private static void syncPositions(RingContent content){
+        for(Row row:rows.values()){
+            RingContent.Item item=content.find(row.id);
+            row.position=item==null?-1:content.items.indexOf(item);
+        }
     }
     private static void reset(ArrayList<View> views){for(View v:views){v.animate().cancel();v.setTranslationY(0);v.setTranslationZ(0);}}
 }

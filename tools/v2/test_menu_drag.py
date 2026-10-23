@@ -17,6 +17,12 @@ sources = {
 'android/util/DisplayMetrics': 'package android.util;public class DisplayMetrics {public float density=1;}',
 'android/os/Bundle': 'package android.os;public class Bundle {}',
 'android/os/SystemClock': 'package android.os;public class SystemClock {public static long time;public static long uptimeMillis(){return time;}}',
+'android/util/Log': 'package android.util;public class Log {public static int w(String t,String m,Throwable e){throw new AssertionError(m,e);}}',
+'android/view/ViewTreeObserver': '''package android.view;import java.util.*;public class ViewTreeObserver {
+ public interface OnPreDrawListener {boolean onPreDraw();}public final List<OnPreDrawListener> listeners=new ArrayList<>();
+ public void addOnPreDrawListener(OnPreDrawListener l){listeners.add(l);}public void removeOnPreDrawListener(OnPreDrawListener l){listeners.remove(l);}public boolean isAlive(){return true;}
+ public boolean draw(){boolean result=true;for(OnPreDrawListener l:List.copyOf(listeners))result&=l.onPreDraw();return result;}
+}''',
 'android/graphics/drawable/Drawable': 'package android.graphics.drawable;public class Drawable {}',
 'android/graphics/drawable/GradientDrawable': '''package android.graphics.drawable;public class GradientDrawable extends Drawable {
  public void setColor(int c){}public void setCornerRadius(float r){}
@@ -38,6 +44,9 @@ sources = {
  public android.graphics.drawable.Drawable background;public android.content.Context context;
  public OnTouchListener touch;public final List<OnAttachStateChangeListener> listeners=new ArrayList<>();
  public final List<Runnable> frames=new ArrayList<>(),delays=new ArrayList<>();public final Animator animator=new Animator(this);
+ public final List<Runnable> posts=new ArrayList<>();public final ViewTreeObserver observer=new ViewTreeObserver();
+ public ViewTreeObserver getViewTreeObserver(){return observer;}public boolean post(Runnable r){posts.add(r);return true;}public void requestLayout(){}public void invalidate(){}
+ public void removeOnAttachStateChangeListener(OnAttachStateChangeListener l){listeners.remove(l);}
  public View(android.content.Context c){context=c;}public android.content.Context getContext(){return context;}
  public android.content.res.Resources getResources(){return new android.content.res.Resources();}
  @SuppressWarnings("unchecked") public <T extends View>T findViewById(int i){return id==i?(T)this:null;}
@@ -61,6 +70,7 @@ sources = {
 }''',
 'android/view/ViewGroup': '''package android.view;import java.util.*;public class ViewGroup extends View {
  public final List<View> children=new ArrayList<>();public int paddingTop,paddingBottom,scroll;public boolean intercept;public Runnable afterScroll;
+ public Object itemAnimator=new Object();public Object getItemAnimator(){return itemAnimator;}public void setItemAnimator(Object value){itemAnimator=value;}
  public ViewGroup(android.content.Context c){super(c);}public static class LayoutParams {public int width,height;public LayoutParams(int w,int h){width=w;height=h;}}
  public void addView(View v,LayoutParams p){children.add(v);v.parent=this;}public void removeView(View v){children.remove(v);v.parent=null;v.detach();}
  public int getChildCount(){return children.size();}public View getChildAt(int i){return children.get(i);}
@@ -94,16 +104,23 @@ public class MenuDragTest {
  }
  static ViewGroup attach(int i){ViewGroup row=new ViewGroup(context);row.top=i*60-list.scroll;LinearLayout widget=new LinearLayout(context);widget.id=android.R.id.widget_frame;
   row.addView(widget,new ViewGroup.LayoutParams(1,1));list.addView(row,new ViewGroup.LayoutParams(1,1));roots.add(row);
-  MenuPickerViews.bind(row,"item"+i,content,(id,p)->commits.add(id+":"+p));return row;}
+  MenuPickerViews.bind(row,"item"+i,()->content,(id,p)->commits.add(id+":"+p));return row;}
  static View handle(int i){return roots.get(i).findViewWithTag("focuspen.reorder");}
  static void event(int i,int a,float y){View v=handle(i);v.touch.onTouch(v,new MotionEvent(a,y));}
  static void frames(int count){for(int i=0;i<count;i++){android.os.SystemClock.time+=16;for(View v:List.copyOf(roots)){List<Runnable> todo=List.copyOf(v.frames);v.frames.clear();for(Runnable r:todo)r.run();}}}
- static void finish(int i){View v=roots.get(i);v.animate().finish();List<Runnable> todo=List.copyOf(v.delays);v.delays.clear();todo.forEach(Runnable::run);}
+ static void posted(){List<Runnable> todo=List.copyOf(list.posts);list.posts.clear();todo.forEach(Runnable::run);}
+ static void finish(int i){View v=roots.get(i);v.animate().finish();Object animator=list.itemAnimator;
+  MenuPickerViews.beforeContentUpdate(list);MenuPickerViews.afterContentUpdate(list);posted();list.observer.draw();
+  check(list.itemAnimator==animator,"native animator not restored");}
  static void idle(){for(View v:roots)check(v.frames.isEmpty(),"frame survived gesture");check(!list.intercept,"parent remained intercepted");}
  public static void main(String[] args){
   setup(12);event(0,0,130);event(0,2,330);frames(90);
   check(list.scroll==480,"scrolled beyond selected rows: "+list.scroll);check(commits.isEmpty(),"saved before release");
   check(Math.abs(roots.get(0).top+roots.get(0).ty-180)<1,"dragged row lost finger during scroll");
+  float dragged=roots.get(0).ty;Map<View,Float> visual=MenuPickerViews.beginGroupDraw(list);
+  for(View row:roots)check(row.ty==0,"card background followed translated boundary row");
+  MenuPickerViews.endGroupDraw(visual);check(roots.get(0).ty==dragged,"background draw lost row transform");
+  check(MenuPickerViews.beginGroupDraw(new ViewGroup(context))==null,"drag affected another list");
   int starts=roots.get(1).animate().starts;frames(10);check(starts==roots.get(1).animate().starts,"stationary frame restarted neighbor animation");
   event(0,1,330);finish(0);check(commits.equals(List.of("item0:11")),"first-to-last failed: "+commits);idle();
   setup(12);list.scrollBy(0,480);event(11,0,310);event(11,2,110);frames(90);check(list.scroll==0,"top edge overscroll");event(11,1,110);finish(11);
@@ -126,6 +143,27 @@ public class MenuDragTest {
   check(commits.isEmpty(),"release at original position persisted stale destination: "+commits);idle();
   setup(3);event(0,0,130);event(0,2,165);event(0,3,250);finish(0);
   check(commits.isEmpty(),"cancel position persisted a move");idle();
+  setup(3);event(0,0,130);event(0,2,250);event(0,1,250);finish(0);
+  check(commits.equals(List.of("item0:2")),"first move in same-page sequence failed");
+  RingContent.Item moved=content.find("item0");content.items.remove(moved);content.items.add(2,moved);
+  roots.get(0).top=120;roots.get(1).top=0;roots.get(2).top=60;
+  event(0,0,250);event(0,2,130);event(0,1,130);finish(0);
+  check(commits.equals(List.of("item0:2","item0:0")),"same-page reverse move used stale position: "+commits);idle();
+  setup(3);Object nativeAnimator=list.itemAnimator;event(0,0,130);event(0,2,250);event(0,1,250);roots.get(0).animate().finish();
+  check(roots.get(0).ty==120,"settled row reset before configuration arrived");
+  MenuPickerViews.beforeContentUpdate(list);check(list.itemAnimator==null,"drop replayed native movement");
+  check(!list.observer.draw(),"drew old positions before adapter sort");
+  for(View row:roots)check(row.ty==0,"custom translation survived handoff");
+  MenuPickerViews.afterContentUpdate(list);check(!list.observer.draw(),"drew before queued adapter update");
+  posted();check(list.observer.draw(),"new layout draw blocked");check(list.itemAnimator==nativeAnimator,"animator not restored after layout");
+  check(list.delays.isEmpty()&&list.observer.listeners.isEmpty(),"handoff callbacks survived completion");
+  MenuPickerViews.beforeContentUpdate(list);check(list.itemAnimator==nativeAnimator,"ordinary checkbox update suppressed native animator");
+  setup(3);nativeAnimator=list.itemAnimator;event(0,0,130);event(0,2,250);event(0,1,250);roots.get(0).animate().finish();
+  MenuPickerViews.beforeContentUpdate(list);list.detach();check(list.itemAnimator==nativeAnimator,"detach left animator disabled");
+  check(list.delays.isEmpty()&&list.observer.listeners.isEmpty(),"detach retained callbacks");
+  setup(3);event(0,0,130);event(0,2,250);event(0,1,250);roots.get(0).animate().finish();
+  for(Runnable task:List.copyOf(list.delays))task.run();check(list.delays.isEmpty(),"missing configuration acknowledgement retained timeout");
+  event(0,0,130);event(0,1,130);idle();
   System.out.println("Production menu drag: edge scroll / both end moves / stationary frames / attach / cancel / multitouch / detach PASS");
  }
 }''',

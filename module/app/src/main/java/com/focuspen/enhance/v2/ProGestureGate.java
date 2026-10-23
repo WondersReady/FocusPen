@@ -5,6 +5,7 @@ final class ProGestureGate {
     enum Decision { PASS, CONSUME, DISPATCH }
     private record Press(int device,long time) {}
     private final Press[] pressed=new Press[4];
+    void reset(){java.util.Arrays.fill(pressed,null);}
     static int gesture(int stylusType,int code) { return stylusType==8 && code>=194 && code<=197?code-194:-1; }
     Decision event(int slot,int device,long time,int action,int repeat,boolean cancelled,boolean eligible) {
         if(slot<0||slot>=pressed.length)return Decision.PASS;

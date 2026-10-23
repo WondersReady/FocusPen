@@ -21,15 +21,30 @@ final class ConfigBackup {
         if (!"focuspen-settings".equals(root.optString("format"))
                 || !Integer.valueOf(1).equals(root.opt("formatVersion")))
             throw new IllegalArgumentException("这不是焦点笔增强的设置备份");
-        if (!Integer.valueOf(ConfigSpec.SCHEMA).equals(root.opt("schemaVersion")))
+        Object schema = root.opt("schemaVersion");
+        boolean legacy = Integer.valueOf(14).equals(schema);
+        if (!legacy && !Integer.valueOf(ConfigSpec.SCHEMA).equals(schema))
             throw new IllegalArgumentException("备份的配置版本不兼容，当前支持版本 " + ConfigSpec.SCHEMA);
         JSONObject settings = root.getJSONObject("settings");
-        if (settings.length() != ConfigSpec.DEFAULTS.size()) throw new IllegalArgumentException("备份包含缺失或未知的设置");
+        if (settings.length() != ConfigSpec.DEFAULTS.size() + (legacy ? 1 : 0)
+                || (legacy && settings.has(ConfigSpec.TIMING)))
+            throw new IllegalArgumentException("备份包含缺失或未知的设置");
         Map<String, Object> result = new LinkedHashMap<>();
         for (String key : ConfigSpec.DEFAULTS.keySet()) {
+            if (legacy && ConfigSpec.TIMING.equals(key)) continue;
             Object value = settings.get(key);
             ConfigSpec.validate(key, value);
             result.put(key, value);
+        }
+        if (legacy) {
+            Object longPress = settings.get(ConfigSpec.LONG_PRESS);
+            Object doublePress = settings.get(ConfigSpec.DOUBLE_PRESS);
+            if (!(longPress instanceof Integer) || (Integer) longPress < 150 || (Integer) longPress > 800
+                    || !(doublePress instanceof Integer) || (Integer) doublePress < 180 || (Integer) doublePress > 450)
+                throw new IllegalArgumentException("旧版手势时序无效");
+            int timing = ConfigSpec.timingFromLegacy(longPress);
+            ConfigSpec.validate(ConfigSpec.TIMING, timing);
+            result.put(ConfigSpec.TIMING, timing);
         }
         return result;
     }

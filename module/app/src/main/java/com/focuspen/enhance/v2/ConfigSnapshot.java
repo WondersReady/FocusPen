@@ -2,7 +2,7 @@ package com.focuspen.enhance.v2;
 
 import android.os.Bundle;
 
-/** Immutable snapshot. Missing or invalid configuration always disables takeover. */
+/** Immutable configuration; input ownership is independent of storage availability. */
 final class ConfigSnapshot {
     final boolean available;
     final long revision;
@@ -26,15 +26,17 @@ final class ConfigSnapshot {
      * valid snapshot means the statically scoped module is active.
      */
     boolean enabled() { return available; }
+    boolean bootOnly() { return values.getBoolean("bootOnly", false); }
+    boolean inputActionsReady() { return available && (!bootOnly() || values.getBoolean("mirrorPresent", false)); }
     boolean flag(String key) { return available && values.getBoolean(key, false); }
     boolean audioEnabled() { return flag(ConfigSpec.AUDIO); }
     int number(String key){return values.getInt(key,(Integer)ConfigSpec.DEFAULTS.get(key));}
     String proBinding(String pkg,int slot){String fallback=text(ProBindings.KEYS[slot]);return flag(ConfigSpec.RULES)?profiles.value(pkg,13+slot,fallback):fallback;}
     int audioVolume() { return values.getInt(ConfigSpec.AUDIO_VOLUME, 65); }
-    int longPressMs() { return values.getInt(ConfigSpec.LONG_PRESS, 200); }
+    int longPressMs() { return values.getInt(ConfigSpec.TIMING, 250); }
     String text(String key) { return values.getString(key, String.valueOf(ConfigSpec.DEFAULTS.get(key))); }
     PenAction buttonAction(int button, boolean longPress) { return PenAction.parse(text(ConfigSpec.buttonKey(button, longPress))); }
-    int doublePressMs() { return values.getInt(ConfigSpec.DOUBLE_PRESS,280); }
+    int doublePressMs() { return longPressMs(); }
     PenAction shortAction(String pkg,int button) {
         if(button==3) return PenAction.NATIVE;
         String value=text("button"+button+"Short");

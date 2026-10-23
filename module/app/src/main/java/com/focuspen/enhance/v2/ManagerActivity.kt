@@ -53,6 +53,9 @@ class ManagerActivity : ComponentActivity() {
     private var message by mutableStateOf<String?>(null)
     private var busy by mutableStateOf(false)
     private var licenseText by mutableStateOf<String?>(null)
+    private var updateResult by mutableStateOf<UpdateChecker.Result?>(null)
+    private var checkingUpdate by mutableStateOf(false)
+    private var automaticUpdates by mutableStateOf(true)
     private val exportDocument = registerForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) fileOperation {
             val bytes = ConfigBackup.encode(ConfigStore.read(this)).toByteArray(Charsets.UTF_8)
@@ -80,6 +83,10 @@ class ManagerActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         pendingImport = savedInstanceState?.getString("pendingImport")
         preview = UiPreferences.model(this)
+        automaticUpdates = UpdateChecker.isEnabled(this)
+        updateResult = UpdateChecker.last(this)
+        UpdateCheckJob.sync(this)
+        if (automaticUpdates) checkUpdates(false)
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
                 while (true) {
@@ -331,6 +338,48 @@ class ManagerActivity : ComponentActivity() {
     private fun selectPreview(id: String) {
         runCatching { UiPreferences.model(this,id); preview = id }.onFailure { message = "未能保存预览选项" }
     }
+    private fun checkUpdates(force: Boolean) {
+        if (checkingUpdate) return
+        lifecycleScope.launch {
+            checkingUpdate = true
+            try {
+                updateResult = withContext(Dispatchers.IO) { UpdateChecker.check(this@ManagerActivity, force) }
+            } finally { checkingUpdate = false }
+        }
+    }
+
+    @Composable private fun Updates() {
+        val result = updateResult
+        val summary = when {
+            checkingUpdate -> "正在检查 GitHub 发布版本…"
+            result?.state() == UpdateChecker.State.AVAILABLE -> "发现新版本 ${result.info()?.versionName()}"
+            result?.state() == UpdateChecker.State.CURRENT -> "当前已是最新发布版本"
+            result?.state() == UpdateChecker.State.RATE_LIMITED -> "GitHub 暂时限制请求，请稍后重试"
+            result?.state() == UpdateChecker.State.ERROR -> "检查未完成，请检查网络后重试"
+            else -> "检查 GitHub 上的新版本，包含测试版"
+        }
+        Group("软件更新") {
+            Card {
+                BasicComponent(title = "自动检查更新", summary = "每天联网检查，在此显示可用版本", endActions = {
+                    Switch(checked = automaticUpdates, onCheckedChange = { enabled ->
+                        lifecycleScope.launch {
+                            runCatching { withContext(Dispatchers.IO) { UpdateChecker.setEnabled(this@ManagerActivity, enabled) } }
+                                .onSuccess { automaticUpdates = enabled; if (enabled) checkUpdates(false) }
+                                .onFailure { message = "未能保存更新设置" }
+                        }
+                    })
+                })
+                ArrowPreference("检查更新", summary = summary, enabled = !checkingUpdate,
+                    startAction = { Leading(MiuixIcons.Regular.Update) }, onClick = { checkUpdates(true) })
+                if (result?.state() == UpdateChecker.State.AVAILABLE) {
+                    result.info()?.let { release ->
+                        ArrowPreference("查看更新并下载", summary = release.versionName(),
+                            onClick = { launch(Intent(Intent.ACTION_VIEW, Uri.parse(release.pageUrl()))) })
+                    }
+                }
+            }
+        }
+    }
     @Composable private fun About() {
         Card {
             Row(Modifier.fillMaxWidth().padding(22.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(16.dp)) {
@@ -342,6 +391,7 @@ class ManagerActivity : ComponentActivity() {
                 }
             }
         }
+        Updates()
         Group("特别感谢") {
             Card {
                 Link("Stylus Plus", "ljlVink · 标准版焦点笔鼠标参考", "https://github.com/ljlVink/StylusPlus", MiuixIcons.Regular.Edit)

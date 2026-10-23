@@ -53,7 +53,8 @@ public final class XposedEntry implements IXposedHookLoadPackage {
                         bootstrapScheduled = true;
                         // LoadedApk changes this context's outer identity after attach returns.
                         Context attachedContext = (Context) param.args[0];
-                        UnlockGate.run(attachedContext, () -> startHost(app, classLoader, process));
+                        if ("com.android.systemui".equals(process)) startHost(app, classLoader, process);
+                        else UnlockGate.run(attachedContext, () -> startHost(app, classLoader, process));
                     } catch (Throwable e) { Log.e(TAG, "Host initialization failed: " + process, e); }
                 }
             });

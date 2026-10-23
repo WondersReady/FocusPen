@@ -112,12 +112,24 @@ final class SettingsHooks {
     }
 
     private static void hookGuideViews(ClassLoader cl) throws Exception {
+        register(cl.loadClass("miuix.preference.v"),"f",android.graphics.Canvas.class,
+                cl.loadClass("androidx.recyclerview.widget.RecyclerView"),cl.loadClass("androidx.recyclerview.widget.F"),new XC_MethodHook(){
+            @Override protected void beforeHookedMethod(MethodHookParam p){
+                p.setObjectExtra("focuspen.cardOffsets",MenuPickerViews.beginGroupDraw((android.view.ViewGroup)p.args[1]));
+            }
+            @SuppressWarnings("unchecked")
+            @Override protected void afterHookedMethod(MethodHookParam p){
+                MenuPickerViews.endGroupDraw((Map<android.view.View,Float>)p.getObjectExtra("focuspen.cardOffsets"));
+            }
+        });
         Class<?> holder = cl.loadClass("androidx.preference.G");
         register(cl.loadClass("androidx.preference.Preference"), "onBindViewHolder", holder, new XC_MethodHook() {
             @Override protected void afterHookedMethod(MethodHookParam p) {
                 String key = (String) call(p.thisObject, "getKey");
                 android.view.View row=(android.view.View)XposedHelpers.getObjectField(p.args[0],"itemView");
-                AppRowStyle.bind(row,key!=null&&(key.startsWith(PREFIX+"add.")||key.startsWith(PREFIX+"pick.")));
+                AppRowStyle.bind(row,key!=null&&(key.startsWith(PREFIX+"add.")||key.startsWith(PREFIX+"pick.")
+                        ||key.startsWith(PREFIX+"profilePick.")
+                        ||key.startsWith(PREFIX+"nav.profile:")));
                 if (key != null && key.startsWith(PREFIX + "guide.card."))
                     GuideNative.card(p.thisObject, p.args[0], Integer.parseInt(key.substring(key.lastIndexOf('.') + 1)));
             }
@@ -132,7 +144,7 @@ final class SettingsHooks {
             @Override protected void afterHookedMethod(MethodHookParam p){
                 String key=(String)call(p.thisObject,"getKey");if(key==null||!key.startsWith(PREFIX+"pick."))return;
                 android.view.View root=(android.view.View)XposedHelpers.getObjectField(p.args[0],"itemView");
-                MenuPickerViews.bind(root,key.substring((PREFIX+"pick.").length()),currentContent(),(id,position)->edit(root.getContext(),ConfigSpec.CONTENT,currentContent().position(id,position).encode()));
+                MenuPickerViews.bind(root,key.substring((PREFIX+"pick.").length()),SettingsHooks::currentContent,(id,position)->edit(root.getContext(),ConfigSpec.CONTENT,currentContent().position(id,position).encode()));
             }
         });
     }
@@ -218,7 +230,7 @@ final class SettingsHooks {
                     // The original pinch fragment's listeners and system-setting writes are absent.
                     superCall.bindTo(p.thisObject).invokeWithArguments(p.args);
                     if ("onCreate".equals(name)) createPage(p.thisObject, page);
-                    else if ("onResume".equals(name)) { setTitle(p.thisObject, title(page)); config.refresh(); }
+                    else if ("onResume".equals(name)) { SettingsAppCatalog.initialize(activity); setTitle(p.thisObject, title(page)); config.refresh(); }
                     else { unbind(p.thisObject); childPages.remove(p.thisObject); }
                 } catch (Throwable e) {
                     Log.e("FocusPenSettings", "Module subpage failed: " + page, e);
@@ -297,6 +309,7 @@ final class SettingsHooks {
     }
 
     private static void injectMain(Object fragment) throws Exception {
+        SettingsAppCatalog.initialize((Context)call(fragment,"requireContext"));
         if (bindings.containsKey(fragment)) { bindings.get(fragment).changed(config.get()); return; }
         Object screen = call(fragment, "getPreferenceScreen");
         Object guide = call(fragment, "findPreference", "guide");
@@ -361,7 +374,10 @@ final class SettingsHooks {
     }
 
     private static void createPage(Object fragment, String page) throws Exception {
+        long started=android.os.SystemClock.uptimeMillis();
         Context c = (Context) call(fragment, "requireContext");
+        SettingsAppCatalog.initialize(c);
+        SettingsAppCatalog.Snapshot catalog=SettingsAppCatalog.snapshot();
         Object screen;
         if(refreshing!=null)screen=call(fragment,"getPreferenceScreen");
         else {
@@ -382,8 +398,8 @@ final class SettingsHooks {
             choices(b,screen,page,title(page),values.toArray(),values.stream().map(ProBindings::label).toArray(String[]::new),null);
             if(slot==4||slot==5){Object apps=category(c,screen,"pro.launch","打开应用");
                 java.util.TreeMap<String,String> installed=new java.util.TreeMap<>();
-                for(android.content.pm.ResolveInfo info:c.getPackageManager().queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0))installed.put(MenuEntry.label(c,info.activityInfo.packageName)+info.activityInfo.packageName,info.activityInfo.packageName);
-                for(String pkg:installed.values())command(c,apps,"launch."+pkg,MenuEntry.label(c,pkg),null,()->edit(c,page,"app:"+pkg));
+                for(String pkg:SettingsAppCatalog.snapshot().packages())installed.put(appLabel(c,pkg)+pkg,pkg);
+                for(String pkg:installed.values())command(c,apps,"launch."+pkg,appLabel(c,pkg),null,()->edit(c,page,"app:"+pkg));
             }
         } else if (page.startsWith("button") || java.util.Arrays.asList(ConfigSpec.PRO_GESTURES).contains(page)) {
             ArrayList<PenAction> actionList = new ArrayList<>();
@@ -414,8 +430,7 @@ final class SettingsHooks {
                     break;
                 case "keys": {
                     toggle(b, group, ConfigSpec.KEYS, "启用按键增强", "标准版按键与 Pro 手势使用自定义设置");
-                    slider(b, group, ConfigSpec.LONG_PRESS, "长按时长", 150, 800, 10);
-                    slider(b, group, ConfigSpec.DOUBLE_PRESS, "快速双击间隔", 180, 450, 10);
+                    slider(b, group, ConfigSpec.TIMING, "按键识别速度", 0, 2, 1);
                     for (int button = 1; button <= 3; button++) {
                         if (button == 3) {
                             choices(b, screen, ConfigSpec.LASER_ACTIVATION, "焦点键 · 激光笔模式启用方式",
@@ -425,7 +440,7 @@ final class SettingsHooks {
                             information(c,buttonGroup,"focus.color","演示中切换颜色","激光或圈注时，短按速记键切换上一色，短按截图键切换下一色。已有笔迹保持原色。");
                             Object mouseGroup=category(c,screen,"focus.mouse","鼠标模式");
                             information(c,mouseGroup,"focus.mouse.enter","双击焦点键切换","未启用激光或圈注时，快速双击焦点键进入鼠标模式；再次双击退出。");
-                            information(c,mouseGroup,"focus.mouse.buttons","点击与拖动","速记键为鼠标左键，截图键为右键；按住对应按键并移动笔可拖动。切换窗口或锁屏后退出，普通模式恢复原按键配置。");
+                            information(c,mouseGroup,"focus.mouse.buttons","点击与拖动","速记键为鼠标左键，截图键为右键；按住对应按键并移动笔可拖动。切换应用、窗口、状态栏或解锁时保持鼠标模式，息屏时退出；锁屏亮屏时也可进入鼠标模式。");
                             continue;
                         }
                         Object buttonGroup = category(c, screen, "keys.button" + button, buttonName(button));
@@ -462,12 +477,15 @@ final class SettingsHooks {
                 case "rules":
                     toggle(b, group, ConfigSpec.RULES, "启用应用配置文件", "随当前操作的窗口切换，未设置的项目沿用全局设置");
                     Object appProfiles=category(c,screen,"rules.apps","应用配置");
-                    navigation(c, appProfiles, "addProfile", "添加应用配置", null);
+                    Object addProfile=navigation(c, appProfiles, "addProfile", "添加应用配置", null);
+                    call(addProfile,"setIcon",c.getDrawable(android.R.drawable.ic_input_add));
                     ArrayList<AppProfiles.Profile> orderedProfiles=new ArrayList<>(AppProfiles.parse(config.get().text(ConfigSpec.PROFILES)).profiles);
                     java.text.Collator profileNames=java.text.Collator.getInstance(java.util.Locale.CHINA);
-                    orderedProfiles.sort((a,z)->{int order=profileNames.compare(MenuEntry.label(c,a.pkg()),MenuEntry.label(c,z.pkg()));return order==0?a.pkg().compareTo(z.pkg()):order;});
-                    for (AppProfiles.Profile p : orderedProfiles)
-                        navigation(c, appProfiles, "profile:"+p.pkg(), MenuEntry.label(c,p.pkg()), p.enabled()?"已启用":"已停用");
+                    orderedProfiles.sort((a,z)->{int order=profileNames.compare(appLabel(c,a.pkg()),appLabel(c,z.pkg()));return order==0?a.pkg().compareTo(z.pkg()):order;});
+                    for (AppProfiles.Profile p : orderedProfiles) {
+                        Object row=navigation(c, appProfiles, "profile:"+p.pkg(), appLabel(c,p.pkg()), p.enabled()?"已启用":"已停用");
+                        call(row,"setIcon",MenuIcons.icon(c,p.pkg()));
+                    }
                     Object reuse=category(c,screen,"rules.templates","复用设置");
                     navigation(c, reuse, "templates", "配置模板", "将同一套操作用于多个应用");
                     rebuildOnChange(fragment,page,b);
@@ -514,6 +532,22 @@ final class SettingsHooks {
             }
         }
         bind(fragment, b);
+        if(usesAppCatalog(page)) {
+        b.catalogChanged=()->{
+            if(bindings.get(fragment)!=b || SettingsAppCatalog.snapshot()==catalog)return;
+            Activity a=activity(fragment);
+            if(a==null||a.isFinishing()||a.isDestroyed())return;
+            try{refreshPage(fragment,page);}catch(Exception failure){Log.w("FocusPenSettings","Application list refresh failed",failure);}
+        };
+        SettingsAppCatalog.addListener(b.catalogChanged);
+        }
+        if(BuildConfig.DEBUG)Log.d("FocusPenSettings","Page "+page+" bound in "+(android.os.SystemClock.uptimeMillis()-started)+"ms catalog="+catalog.ready());
+    }
+    private static boolean usesAppCatalog(String page) {
+        return page.equals("rules")||page.equals("content")||page.equals("addContent")||page.equals("selectContent")
+                ||page.equals("addProfile")||page.startsWith("profile:")||page.startsWith("copyProfile:")
+                ||page.startsWith("copyTarget:")||page.startsWith("item:")||page.startsWith("replace:")
+                ||page.startsWith("position:")||java.util.Arrays.asList(ProBindings.KEYS).contains(page);
     }
 
     private static void managementPage(Object fragment, String page, Context c, Object screen, Binding b) throws Exception {
@@ -526,7 +560,7 @@ final class SettingsHooks {
         } else if(page.startsWith("position:")) {
             String id=page.substring(9);RingContent.Item item=content.find(id);
             if(item!=null)for(int i=0;i<content.items.size();i++){
-                final int position=i;String name=MenuEntry.label(c,content.items.get(i).id());
+                final int position=i;String name=appLabel(c,content.items.get(i).id());
                 command(c,group,"position."+i,"第 "+(i+1)+" 项",content.items.get(i).id().equals(id)?"当前位置":name,()->{
                     b.nextPage="content";edit(c,ConfigSpec.CONTENT,currentContent().position(id,position).encode());
                 });
@@ -535,38 +569,28 @@ final class SettingsHooks {
             String id=page.substring(5); RingContent.Item item=content.find(id);
             if (item==null) { navigation(c,group,"content","返回菜单内容",null); }
             else {
-                navigation(c,group,"replace:"+id,"项目内容",MenuEntry.label(c,id));
+                navigation(c,group,"replace:"+id,"项目内容",appLabel(c,id));
                 navigation(c,group,"position:"+id,"排列位置","第 "+(content.items.indexOf(item)+1)+" 项");
                 if(!item.enabled())command(c,group,"restore","恢复到菜单","此项目在旧版中已停用",()->{b.nextPage="content";edit(c,ConfigSpec.CONTENT,currentContent().enable(id,true).encode());});
                 command(c,group,"remove","移除项目",null,()->{b.nextPage="content";edit(c,ConfigSpec.CONTENT,currentContent().remove(id).encode());});
             }
-        } else if (page.startsWith("replace:") || page.equals("addProfile")) {
-            boolean menu=!page.equals("addProfile");String replacing=page.startsWith("replace:")?page.substring(8):null;
-            Consumer<String> select=id->{b.nextPage="content";RingContent current=currentContent();edit(c,ConfigSpec.CONTENT,(replacing==null?current.add(id):current.replace(replacing,id)).encode());};
-            if (menu && replacing==null && content.items.size()>=RingContent.MAX_ITEMS) information(c,group,"full","菜单已满","最多 12 项，请先删除一个项目。");
-            else {
-                Object officialGroup = menu ? category(c, screen, "official.actions", "官方动作") : group;
-                Object appGroup = menu ? category(c, screen, "application.actions", "应用") : group;
-                if (menu) for (String id : new String[]{RingContent.NOTES,RingContent.CREATION,RingContent.SCREENSHOT,RingContent.RECOGNITION}) {
-                    if (content.find(id)==null) iconCommand(c,officialGroup,"add."+id,id,MenuEntry.available(c,id)?null:"目标不可用，安装后生效",()->select.accept(id));
-                }
-                java.text.Collator appOrder=java.text.Collator.getInstance(java.util.Locale.CHINA);
-                java.util.TreeMap<String,String> apps=new java.util.TreeMap<>((a,z)->{int r=appOrder.compare(a,z);return r==0?a.compareTo(z):r;});
-                for (android.content.pm.ResolveInfo info : c.getPackageManager().queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0)) {
-                    String pkg=info.activityInfo.packageName;
-                    if ((menu && content.find(pkg)!=null) || (!menu && profiles.find(pkg)!=null)) continue;
-                    apps.put(MenuEntry.label(c,pkg)+"\u0000"+pkg,pkg);
-                }
-                for (String pkg:apps.values()) {
-                    iconCommand(c,appGroup,"add."+pkg,pkg,pkg,()-> {
-                    if (menu) select.accept(pkg);
-                    else {
-                        b.nextPage="profile:"+pkg;
-                        edit(c,ConfigSpec.PROFILES,currentProfiles().set(pkg,-1,AppProfiles.INHERIT).encode());
-                    }
-                    });
-                }
+        } else if (page.equals("addProfile")) {
+            appPicker(fragment,c,screen,group,b,profiles);
+        } else if (page.startsWith("replace:")) {
+            String replacing=page.substring(8);
+            Consumer<String> select=id->{b.nextPage="content";edit(c,ConfigSpec.CONTENT,currentContent().replace(replacing,id).encode());};
+            Object officialGroup = category(c, screen, "official.actions", "官方动作");
+            Object appGroup = category(c, screen, "application.actions", "应用");
+            for (String id : new String[]{RingContent.NOTES,RingContent.CREATION,RingContent.SCREENSHOT,RingContent.RECOGNITION}) {
+                if (content.find(id)==null) iconCommand(c,officialGroup,"add."+id,id,MenuEntry.available(c,id)?null:"目标不可用，安装后生效",()->select.accept(id));
             }
+            java.text.Collator appOrder=java.text.Collator.getInstance(java.util.Locale.CHINA);
+            java.util.TreeMap<String,String> apps=new java.util.TreeMap<>((a,z)->{int r=appOrder.compare(a,z);return r==0?a.compareTo(z):r;});
+            for (String pkg : SettingsAppCatalog.snapshot().packages()) {
+                if (content.find(pkg)!=null) continue;
+                apps.put(appLabel(c,pkg)+"\u0000"+pkg,pkg);
+            }
+            for (String pkg:apps.values()) iconCommand(c,appGroup,"add."+pkg,pkg,pkg,()->select.accept(pkg));
         } else if (page.equals("templates") || page.equals("addTemplate") || page.startsWith("template:")) {
             if (page.equals("templates")) {
                 information(c,group,"template.count","已创建 " + profiles.templates.size() + " 个模板","模板可套用到多个应用配置；应用仍可逐项覆盖。");
@@ -608,7 +632,7 @@ final class SettingsHooks {
             String pkg=page.substring(8); AppProfiles.Profile profile=profiles.find(pkg);
             if (profile==null) navigation(c,group,"rules","返回应用配置文件",null);
             else {
-                Object enabled=preference(c,"miuix.preference.CheckBoxPreference","profile.enabled","启用此配置",MenuEntry.label(c,pkg));
+                Object enabled=preference(c,"miuix.preference.CheckBoxPreference","profile.enabled","启用此配置",appLabel(c,pkg));
                 call(enabled,"setChecked",profile.enabled());
                 listener(enabled,"setOnPreferenceChangeListener",args->{edit(c,ConfigSpec.PROFILES,currentProfiles().set(pkg,-2,String.valueOf(args[1])).encode()); return false;}); add(group,enabled);
                 String mode=profile.mode().equals("template")?"模板："+profiles.template(profile.template()).name():profile.mode().equals("default")?"全局默认":"自定义";
@@ -625,14 +649,13 @@ final class SettingsHooks {
             String source=page.substring(12);
             if(profiles.find(source)==null) navigation(c,group,"rules","返回应用配置文件",null);
             else {
-                information(c,group,"copy.source","来源："+MenuEntry.label(c,source),"选择目标后可核对复制内容。继承项继续跟随全局；复制后不再跟随来源模板更新。");
+                information(c,group,"copy.source","来源："+appLabel(c,source),"选择目标后可核对复制内容。继承项继续跟随全局；复制后不再跟随来源模板更新。");
                 java.text.Collator appOrder=java.text.Collator.getInstance(java.util.Locale.CHINA);
                 java.util.TreeMap<String,String> apps=new java.util.TreeMap<>((a,z)->{int r=appOrder.compare(a,z);return r==0?a.compareTo(z):r;});
-                for(android.content.pm.ResolveInfo info:c.getPackageManager().queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0)) {
-                    String pkg=info.activityInfo.packageName;
-                    if(!pkg.equals(source)) apps.put(MenuEntry.label(c,pkg)+"\u0000"+pkg,pkg);
+                for (String pkg : SettingsAppCatalog.snapshot().packages()) {
+                    if(!pkg.equals(source)) apps.put(appLabel(c,pkg)+"\u0000"+pkg,pkg);
                 }
-                for(String pkg:apps.values()) navigation(c,group,"copyTarget:"+source+":"+pkg,MenuEntry.label(c,pkg),
+                for(String pkg:apps.values()) navigation(c,group,"copyTarget:"+source+":"+pkg,appLabel(c,pkg),
                         profiles.find(pkg)==null?"新建配置":"已有配置，确认后覆盖");
             }
         } else if(page.startsWith("copyTarget:")) {
@@ -640,20 +663,23 @@ final class SettingsHooks {
             AppProfiles.Profile from=profiles.find(source),to=profiles.find(target);
             if(from==null) navigation(c,group,"rules","返回应用配置文件",null);
             else {
-                information(c,group,"copy.source","来源："+MenuEntry.label(c,source),source);
-                information(c,group,"copy.target","目标："+MenuEntry.label(c,target),target);
+                information(c,group,"copy.source","来源："+appLabel(c,source),source);
+                information(c,group,"copy.target","目标："+appLabel(c,target),target);
                 information(c,group,"copy.help","复制为自定义配置","继承项继续跟随全局；不跟随来源模板更新。"
                         +(to==null?"新配置沿用来源的启用状态。":"覆盖目标保存的设置，保留目标的启用状态。"));
                 java.util.List<String> values=profiles.effective(from);
                 for(int field:PROFILE_FIELDS) if(fieldVisible(c,field))information(c,group,"copy.field."+field,fieldTitle(field),fieldLabel(field,values.get(field)));
-                boolean full=to==null && profiles.profiles.size()>=100;
-                if(full) information(c,group,"copy.full","应用配置已满","最多 100 个；请先删除一个配置，或选择已有配置。");
-                else command(c,group,"copy.confirm",to==null?"确认创建配置":"确认覆盖配置",MenuEntry.label(c,target),()->{
+                command(c,group,"copy.confirm",to==null?"确认创建配置":"确认覆盖配置",appLabel(c,target),()->{
                     if(config.get().revision!=s.revision) {
                         Toast.makeText(c,"配置已更新，请核对页面后重试",Toast.LENGTH_SHORT).show(); return;
                     }
-                    b.nextPage="profile:"+target;
-                    edit(c,ConfigSpec.PROFILES,currentProfiles().copy(source,target).encode());
+                    try {
+                        String value=currentProfiles().copy(source,target).encode();
+                        b.nextPage="profile:"+target;
+                        edit(c,ConfigSpec.PROFILES,value);
+                    } catch(IllegalArgumentException failure) {
+                        Toast.makeText(c,"应用配置已达存储上限",Toast.LENGTH_SHORT).show();
+                    }
                 });
             }
         } else if(page.startsWith("profileMode:")) {
@@ -677,19 +703,73 @@ final class SettingsHooks {
                         ()->edit(c,ConfigSpec.PROFILES,currentProfiles().set(pkg,field,value).encode()));
             }
         }
-        if(!page.equals("content")&&!page.equals("addContent")&&!page.equals("selectContent"))rebuildOnChange(fragment,page,b);
+        if(!page.equals("content")&&!page.equals("addContent")&&!page.equals("selectContent")&&!page.equals("addProfile"))rebuildOnChange(fragment,page,b);
     }
     private static RingContent currentContent() { return RingContent.parse(config.get().text(ConfigSpec.CONTENT)); }
+    private static String appLabel(Context c,String id) {
+        return RingContent.isAction(id)?MenuEntry.label(c,id):SettingsAppCatalog.snapshot().label(id);
+    }
+    private static boolean appAvailable(Context c,String id) {
+        return RingContent.isAction(id)?MenuEntry.available(c,id):SettingsAppCatalog.snapshot().contains(id);
+    }
+    private static void appPicker(Object fragment,Context c,Object screen,Object selected,Binding b,AppProfiles initial)throws Exception {
+        call(selected,"setTitle","已选应用 · "+initial.profiles.size());
+        Object apps=category(c,screen,"profilePicker.apps","应用 · 按名称排序");
+        if(!SettingsAppCatalog.snapshot().ready())information(c,apps,"apps.loading","正在读取应用列表",null);
+        java.text.Collator order=java.text.Collator.getInstance(java.util.Locale.CHINA);
+        Map<String,String> labels=new java.util.HashMap<>();
+        java.util.TreeSet<String> ids=new java.util.TreeSet<>((a,z)->{int r=order.compare(labels.computeIfAbsent(a,id->appLabel(c,id)),labels.computeIfAbsent(z,id->appLabel(c,id)));return r==0?a.compareTo(z):r;});
+        for(AppProfiles.Profile profile:initial.profiles)ids.add(profile.pkg());
+        ids.addAll(SettingsAppCatalog.snapshot().packages());
+        Map<String,Object> rows=new java.util.TreeMap<>(ids.comparator());
+        for(String pkg:ids){boolean chosen=initial.find(pkg)!=null;
+            rows.put(pkg,profileChoice(c,chosen?selected:apps,pkg,chosen));
+        }
+        final String[] previous={initial.encode()};
+        b.updates.add(snapshot->{
+            String value=snapshot.text(ConfigSpec.PROFILES);if(value.equals(previous[0]))return;
+            AppProfiles next=AppProfiles.parse(value);
+            call(selected,"setTitle","已选应用 · "+next.profiles.size());
+            try {
+                for(AppProfiles.Profile profile:next.profiles)if(!rows.containsKey(profile.pkg()))
+                    rows.put(profile.pkg(),profileChoice(c,selected,profile.pkg(),true));
+            }catch(Exception failure){throw new IllegalStateException("Cannot bind imported profile",failure);}
+            int alphabetical=0;
+            for(Map.Entry<String,Object> entry:rows.entrySet()){
+                String pkg=entry.getKey();Object row=entry.getValue();boolean chosen=next.find(pkg)!=null;
+                Object destination=chosen?selected:apps;
+                Object parent=call(row,"getParent");
+                if(parent!=destination){long stableId=((Number)call(row,"getId")).longValue();call(parent,"k",row);call(row,"setOrder",alphabetical);add(destination,row);XposedHelpers.setLongField(row,"mId",stableId);}
+                call(row,"setChecked",chosen);
+                alphabetical++;
+            }
+            previous[0]=value;
+            refreshList(fragment);
+        });
+    }
+    private static Object profileChoice(Context c,Object group,String pkg,boolean selected)throws Exception {
+        Object choice=preference(c,"miuix.preference.CheckBoxPreference","profilePick."+pkg,appLabel(c,pkg),null);
+        call(choice,"setIcon",MenuIcons.icon(c,pkg));call(choice,"setChecked",selected);
+        listener(choice,"setOnPreferenceChangeListener",args->{
+            try { AppProfiles profiles=currentProfiles();
+                edit(c,ConfigSpec.PROFILES,(Boolean.TRUE.equals(args[1])
+                        ? profiles.select(pkg,"default","") : profiles.remove(pkg)).encode()); }
+            catch(IllegalArgumentException failure) { Toast.makeText(c,"应用配置已达存储上限",Toast.LENGTH_SHORT).show(); }
+            return false;
+        });
+        add(group,choice);return choice;
+    }
     private static void menuPicker(Object fragment,Context c,Object screen,Object selected,Binding b,RingContent initial)throws Exception {
         call(selected,"setTitle","已选项目 · "+initial.items.size()+" / "+RingContent.MAX_ITEMS);
         Object official=category(c,screen,"picker.official","官方动作");
         Object apps=category(c,screen,"picker.apps","应用 · 按名称排序");
+        if(!SettingsAppCatalog.snapshot().ready())information(c,apps,"apps.loading","正在读取应用列表",null);
         java.text.Collator order=java.text.Collator.getInstance(java.util.Locale.CHINA);
         Map<String,String> labels=new java.util.HashMap<>();
-        java.util.TreeSet<String> ids=new java.util.TreeSet<>((a,z)->{int r=order.compare(labels.computeIfAbsent(a,id->MenuEntry.label(c,id)),labels.computeIfAbsent(z,id->MenuEntry.label(c,id)));return r==0?a.compareTo(z):r;});
+        java.util.TreeSet<String> ids=new java.util.TreeSet<>((a,z)->{int r=order.compare(labels.computeIfAbsent(a,id->appLabel(c,id)),labels.computeIfAbsent(z,id->appLabel(c,id)));return r==0?a.compareTo(z):r;});
         ids.addAll(java.util.List.of(RingContent.NOTES,RingContent.CREATION,RingContent.SCREENSHOT,RingContent.RECOGNITION));
         for(RingContent.Item item:initial.items)ids.add(item.id());
-        for(android.content.pm.ResolveInfo info:c.getPackageManager().queryIntentActivities(new Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0))ids.add(info.activityInfo.packageName);
+        ids.addAll(SettingsAppCatalog.snapshot().packages());
         Map<String,Object> rows=new java.util.TreeMap<>(ids.comparator());
         for(String id:ids){boolean chosen=initial.find(id)!=null;
             Object row=menuChoice(c,chosen?selected:RingContent.isAction(id)?official:apps,id,chosen);
@@ -699,7 +779,8 @@ final class SettingsHooks {
         final String[] previous={initial.encode()};
         b.updates.add(snapshot->{
             String value=snapshot.text(ConfigSpec.CONTENT);if(value.equals(previous[0]))return;
-            RingContent before=RingContent.parse(previous[0]);
+            android.view.View list=(android.view.View)call(fragment,"getListView");
+            MenuPickerViews.beforeContentUpdate(list);
             RingContent next=RingContent.parse(value);call(selected,"setTitle","已选项目 · "+next.items.size()+" / "+RingContent.MAX_ITEMS);
             // An imported backup may refer to an unavailable app that was not in
             // the initial launcher query. Keep it visible and removable in place.
@@ -715,16 +796,14 @@ final class SettingsHooks {
                 if(parent!=destination){long stableId=((Number)call(row,"getId")).longValue();call(parent,"k",row);call(row,"setOrder",chosen?next.items.indexOf(item):alphabetical);add(destination,row);XposedHelpers.setLongField(row,"mId",stableId);}
                 else call(row,"setOrder",chosen?next.items.indexOf(item):alphabetical);
                 call(row,"setChecked",chosen);
-                // Checked changes already invalidate the native row. Rebind selected rows
-                // only when their drag position or accessibility move bounds have changed.
-                RingContent.Item oldItem=before.find(id);
-                if(chosen&&(oldItem==null||before.items.size()!=next.items.size()
-                        ||before.items.indexOf(oldItem)!=next.items.indexOf(item)))call(row,"notifyChanged");
+                // Drag and accessibility positions are read from the current content.
+                // Reordering alone must not recreate handles or animate row changes.
                 alphabetical++;
             }
             previous[0]=value;
             call(official,"setVisible",hasUnselectedOfficial(next));
             refreshList(fragment);
+            MenuPickerViews.afterContentUpdate(list);
         });
     }
     private static boolean hasUnselectedOfficial(RingContent content){
@@ -733,7 +812,7 @@ final class SettingsHooks {
         return false;
     }
     private static Object menuChoice(Context c,Object group,String id,boolean selected)throws Exception{
-        Object choice=preference(c,"miuix.preference.CheckBoxPreference","pick."+id,MenuEntry.label(c,id),MenuEntry.available(c,id)?null:"目标暂不可用");
+        Object choice=preference(c,"miuix.preference.CheckBoxPreference","pick."+id,appLabel(c,id),appAvailable(c,id)?null:"目标暂不可用");
         call(choice,"setIcon",MenuIcons.icon(c,id));call(choice,"setChecked",selected);
         listener(choice,"setOnPreferenceChangeListener",args->{
             RingContent current=currentContent();boolean checked=(Boolean)args[1];
@@ -779,7 +858,7 @@ final class SettingsHooks {
         return DirectionAdapter.parse(value).label;
     }
     private static void iconCommand(Context c,Object group,String key,String id,String summary,Runnable action) throws Exception {
-        Object p=preference(c,"androidx.preference.Preference",key,MenuEntry.label(c,id),summary);
+        Object p=preference(c,"androidx.preference.Preference",key,appLabel(c,id),summary);
         call(p,"setIcon",MenuIcons.icon(c,id));
         listener(p,"setOnPreferenceClickListener",args->{action.run();return true;});add(group,p);
     }
@@ -820,7 +899,7 @@ final class SettingsHooks {
             add(group, item); prefs.add(item);
         }
         b.updates.add(s -> {
-            Object current = ConfigSpec.LONG_PRESS.equals(key) ? s.longPressMs() : ConfigSpec.DOUBLE_PRESS.equals(key) ? s.doublePressMs() : s.text(key);
+            Object current = s.text(key);
             call(group, "setEnabled", s.available);
             for (int i = 0; i < values.length; i++) if (values[i].equals(current)) call(group, "n", prefs.get(i));
         });
@@ -835,11 +914,11 @@ final class SettingsHooks {
             // SeekBar's key increment does not quantize touch drags.
             int raw = ((Number) args[1]).intValue();
             int value = Math.max(min, Math.min(max, min + Math.round((raw - min) / (float) step) * step));
-            edit(b.context, key, value);
+            edit(b.context, key, ConfigSpec.TIMING.equals(key) ? 150 + value * 100 : value);
             return false;
         });
         b.updates.add(s -> {
-            int value = s.number(key);
+            int value = ConfigSpec.TIMING.equals(key) ? (s.longPressMs() - 150) / 100 : s.number(key);
             call(sliderPreference, "setEnabled", s.available
                     && (!ConfigSpec.AUDIO_VOLUME.equals(key) || s.flag(ConfigSpec.AUDIO)));
             call(sliderPreference, "h", value, true);
@@ -1014,6 +1093,7 @@ final class SettingsHooks {
         Binding b = bindings.remove(f);
         if (b != null) {
             config.remove(b);
+            if(b.catalogChanged!=null)SettingsAppCatalog.removeListener(b.catalogChanged);
             if (b.demo != null) { b.demo.dismiss(); b.demo = null; }
         }
     }
@@ -1021,6 +1101,7 @@ final class SettingsHooks {
         final Context context;
         final ArrayList<Consumer<ConfigSnapshot>> updates = new ArrayList<>();
         boolean rebuildPosted;
+        Runnable catalogChanged;
         String nextPage;
         GuideDemo demo;
         Binding(Context c) { context = c; }

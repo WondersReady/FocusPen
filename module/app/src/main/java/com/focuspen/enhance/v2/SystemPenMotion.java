@@ -61,7 +61,7 @@ final class SystemPenMotion {
                 && e.getToolType(0)!=MotionEvent.TOOL_TYPE_MOUSE)
         {
             WindowDirectionHost.CONTACT.observe(e.getActionMasked());
-            if(e.getActionMasked()==MotionEvent.ACTION_DOWN)PenMouse.exit();
+            if(e.getActionMasked()==MotionEvent.ACTION_DOWN)PenMouse.contextChanged();
         }
         ConfigSnapshot s=config.get();
         if(!s.enabled() || (!s.flag(ConfigSpec.RING)&&!s.previewPossible()&&!s.audioEnabled()) || e.getPointerCount()==0) return;

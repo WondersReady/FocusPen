@@ -6,15 +6,16 @@ import java.util.Map;
 
 /** Persisted schema with explicit defaults and a closed set of accepted writes. */
 final class ConfigSpec {
-    static final int SCHEMA = 14;
+    static final int SCHEMA = 15;
     static final String SCREEN_OFF_TARGET = "screenOffTarget";
     static final String LASER_ACTIVATION = "laserActivation";
     static final String[] PRO_GESTURES = {"proPinch", "proDouble", "proSlideUp", "proSlideDown"};
-    static final String PROFILES = "applicationProfiles", DOUBLE_PRESS = "doublePressMs", SCREEN_OFF = "screenOffNote";
+    static final String PROFILES = "applicationProfiles", SCREEN_OFF = "screenOffNote";
     static final String CONTENT = "ringContent";
     static final String ENABLED = "enabled", RING = "ringEnabled", PREVIEW = "previewEnabled", AUDIO = "writingAudioEnabled", AUDIO_VOLUME = "writingAudioVolume";
     static final String KEYS = "keysEnabled", RULES = "rulesEnabled";
-    static final String LONG_PRESS = "longPressMs";
+    static final String TIMING = "gestureTimingMs";
+    static final String LONG_PRESS = "longPressMs", DOUBLE_PRESS = "doublePressMs"; // Schema 14 migration only.
     static final String MATERIAL = "ringMaterial", TEXTURE = "texture", GLASS = "glass";
     static final Map<String, Object> DEFAULTS;
     static {
@@ -23,10 +24,10 @@ final class ConfigSpec {
         // static-scope enable/disable state, not a hidden in-app preference.
         v.put(ENABLED, true);
         v.put(RING, true); v.put(PREVIEW, true); v.put(AUDIO, false); v.put(AUDIO_VOLUME, 65); v.put(KEYS, true); v.put(RULES, true);
-        v.put(LONG_PRESS, 200);
+        v.put(TIMING, 250);
         v.put(MATERIAL, TEXTURE);
         v.put(CONTENT, RingContent.DEFAULT);
-        v.put(PROFILES, AppProfiles.EMPTY); v.put(DOUBLE_PRESS, 280); v.put(SCREEN_OFF, false);
+        v.put(PROFILES, AppProfiles.EMPTY); v.put(SCREEN_OFF, false);
         v.put(SCREEN_OFF_TARGET, "note"); v.put(LASER_ACTIVATION, "hold");
         for(int i=0;i<ProBindings.KEYS.length;i++)v.put(ProBindings.KEYS[i],ProBindings.DEFAULTS[i]);
         v.put(ProBindings.INTERVAL,360);v.put(ProBindings.HOLD,650);
@@ -42,9 +43,8 @@ final class ConfigSpec {
         Object expected = DEFAULTS.get(key);
         if (expected == null || value == null || !expected.getClass().equals(value.getClass()))
             throw new IllegalArgumentException("Unknown setting or incorrect value type");
-        if (LONG_PRESS.equals(key) && ((Integer) value < 150 || (Integer) value > 800))
-            throw new IllegalArgumentException("Long press must be between 150 and 800 ms");
-        if (DOUBLE_PRESS.equals(key) && ((Integer)value < 180 || (Integer)value > 450)) throw new IllegalArgumentException("Invalid double interval");
+        if (TIMING.equals(key) && (Integer) value != 150 && (Integer) value != 250 && (Integer) value != 350)
+            throw new IllegalArgumentException("Unknown gesture timing preset");
         if (AUDIO_VOLUME.equals(key) && ((Integer)value < 0 || (Integer)value > 100)) throw new IllegalArgumentException("Audio volume must be between 0 and 100");
         if (PROFILES.equals(key)) AppProfiles.parse((String)value);
         if (MATERIAL.equals(key) && !TEXTURE.equals(value) && !GLASS.equals(value))
@@ -65,6 +65,13 @@ final class ConfigSpec {
     static String buttonKey(int button, boolean longPress) {
         if (button < 1 || button > 3) throw new IllegalArgumentException("Unknown button");
         return "button" + button + (longPress ? "Long" : "Short");
+    }
+    static int timingFromLegacy(Object longPress) {
+        if (!(longPress instanceof Integer)) return 250;
+        int ms = (Integer) longPress;
+        if (ms < 150 || ms > 800) return 250;
+        if (ms < 200) return 150;
+        return ms <= 300 ? 250 : 350;
     }
     private ConfigSpec() { }
 }

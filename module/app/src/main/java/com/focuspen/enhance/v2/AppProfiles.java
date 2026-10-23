@@ -7,6 +7,8 @@ import java.nio.charset.StandardCharsets;
 final class AppProfiles {
     static final String EMPTY="v4", INHERIT="inherit";
     static final int FIELD_COUNT=25, PREVIEW_FIELD=6;
+    // Snapshots cross Binder; keep the encoded profile value bounded.
+    static final int MAX_SERIALIZED_LENGTH=262_144;
     static final String[] FIELDS={"button1Long","button1Double","button2Long","button2Double","up","down","preview",
             "button1Short","button2Short","proPinch","proDouble","proSlideUp","proSlideDown", "proTwoPinch","proTwoHold","proNormalUp","proNormalDown","proFourPinch","proFourHold","proMouseOne","proMouseHold","proMouseTwo","proMouseTwoHold","proMouseUp","proMouseDown"};
     record Profile(String pkg,boolean enabled,String mode,String template,List<String> values) {}
@@ -27,7 +29,7 @@ final class AppProfiles {
         return List.copyOf(options);
     }
     static AppProfiles parse(String text) {
-        if(text==null||text.length()>65536) throw new IllegalArgumentException("Invalid profiles");
+        if(text==null||text.length()>MAX_SERIALIZED_LENGTH) throw new IllegalArgumentException("Invalid profiles");
         String[] lines=text.split("\n",-1); boolean legacy=lines[0].equals("v1");
         boolean old=lines[0].equals("v2"), v3=lines[0].equals("v3");
         if(!legacy&&!old&&!v3&&!lines[0].equals(EMPTY)) throw new IllegalArgumentException("Unknown profiles format");
@@ -47,7 +49,7 @@ final class AppProfiles {
                 p.add(new Profile(v[1],v[2].equals("1"),v[3],v[4],fields(v,5,v.length-5)));
             } else throw new IllegalArgumentException("Invalid profile row");
         }
-        if(p.size()>100||t.size()>50) throw new IllegalArgumentException("Too many profiles");
+        if(t.size()>50) throw new IllegalArgumentException("Too many templates");
         AppProfiles result=new AppProfiles(p,t);
         for(Profile a:p) if(a.mode.equals("template")&&result.template(a.template)==null) throw new IllegalArgumentException("Missing template");
         return result;

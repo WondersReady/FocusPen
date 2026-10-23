@@ -10,11 +10,11 @@ android {
     buildToolsVersion = "37.0.0"
 
     defaultConfig {
-        applicationId = "com.focuspen.enhance.v2"
+        applicationId = "io.github.wondersready.focuspen"
         minSdk = 28
         targetSdk = 37
-        versionCode = 32
-        versionName = "0.7.7-editor-dev"
+        versionCode = 46
+        versionName = "1.0-Beta"
     }
 
     compileOptions {
@@ -27,7 +27,6 @@ android {
         compose = true
     }
 
-    // Skeleton phase: we need a valid, installable APK, not a lint-clean project.
     lint {
         abortOnError = false
         checkReleaseBuilds = false

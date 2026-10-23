@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the production handwriting lessons with partial host resources."""
+"""Compile the production guide model against partial host resource doubles."""
 from pathlib import Path
 import os
 import subprocess
@@ -44,19 +44,41 @@ public class GuideContentTest {
   }
   GuideContent.Step[] full=GuideContent.steps(host,4,false,new ConfigSnapshot());
   check(full.length==6,"all six handwriting pages must exist");
-  for(int i=0;i<6;i++)check(full[i].title().equals("official title "+i),"official page "+i);
+  for(int i=0;i<6;i++){
+   check(full[i].title().equals("official title "+i),"official page "+i);
+   check(GuideContent.animation(4,i,false).equals("stylus_guide_"+keys[i]+"_cn"),"animation for page "+i);
+  }
   host.resources.ids.remove("guide_select_word_tip");
   GuideContent.Step[] partial=GuideContent.steps(host,4,false,new ConfigSnapshot());
-  check(partial.length==6 && partial[2].title().equals("选择文字"),"third page fallback and count");
-  check(partial[3].title().equals("official title 3") && partial[5].title().equals("official title 5"),"later official pages survive missing third resource");
+  check(partial.length==6&&partial[2].title().equals("选择文字"),"third page fallback");
+  check(partial[3].title().equals("official title 3")&&partial[5].title().equals("official title 5"),"later official pages survive");
   host.broken=8;
   GuideContent.Step[] failed=GuideContent.steps(host,4,true,new ConfigSnapshot());
-  check(failed.length==6 && failed[3].title().equals("插入空格"),"string read failure falls back only on its page");
-  check(failed[4].title().equals("official title 4"),"string read failure does not lose later pages");
+  check(failed[3].title().equals("插入空格")&&failed[4].title().equals("official title 4"),"string failure isolated to one page");
   host.resources.ids.clear();
   GuideContent.Step[] fallback=GuideContent.steps(host,4,false,new ConfigSnapshot());
-  check(fallback.length==6 && fallback[5].title().equals("插入文字"),"complete fallback has all six pages");
-  System.out.println("Handwriting guide: six stable pages with partial host resources PASS");
+  check(fallback.length==6&&fallback[4].title().equals("换行")&&fallback[5].title().equals("插入文字"),"complete fallback maps all six lessons");
+  check(GuideContent.steps(host,6,false,new ConfigSnapshot()).length==2,"notes and screenshot use two pages");
+  check(GuideContent.steps(host,6,true,new ConfigSnapshot()).length==2,"Pro notes and screenshot use two pages");
+  GuideContent.Step[] keyLessons=GuideContent.steps(host,0,false,new ConfigSnapshot());
+  check(keyLessons[1].title().contains("焦点键")&&keyLessons[1].text().contains("激光"),"hold lesson teaches focus-key laser");
+  check(keyLessons[2].title().contains("焦点键")&&keyLessons[2].text().contains("鼠标")&&keyLessons[2].detail().contains("圈注"),"double lesson teaches mouse guard");
+  check(GuideContent.TITLES[5].equals("演示、圈注与鼠标"),"presentation title includes mouse");
+  GuideContent.Step[] notes=GuideContent.steps(host,6,false,new ConfigSnapshot());
+  check(notes[1].text().contains("空白处点一下")&&!notes[1].text().contains("锁屏"),"screen-off lesson has one tap");
+  for(boolean pro:new boolean[]{false,true}){
+   GuideContent.Step[] presentation=GuideContent.steps(host,5,pro,new ConfigSnapshot());
+   check(presentation.length==(pro?4:8),"standard presentation has mouse lessons; Pro stays hardware-specific");
+   for(GuideContent.Step page:presentation)check(!page.title().contains("遥控拍照")&&!page.detail().contains("官方输入优先"),"no camera bypass claim");
+   check(presentation[0].detail().contains(pro?"双击笔身":"先关闭激光"),"laser exit must match current mode");
+   check(presentation[1].text().contains(pro?"轻捏并按住":"长按焦点键"),"drawing uses the owned gesture");
+   if(!pro){
+    check(presentation[4].text().contains("先退出激光和圈注"),"mouse entry precondition");
+    check(presentation[5].text().contains("速记键为左键")&&presentation[5].text().contains("截图键为右键"),"mouse buttons");
+    check(presentation[6].text().contains("拖动")&&presentation[7].text().contains("结束鼠标"),"drag and exit lessons");
+   }
+  }
+  System.out.println("Guide content: six mapped handwriting pages, isolated fallback, two notes pages PASS");
  }
 }""",
 }

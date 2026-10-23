@@ -14,6 +14,11 @@ final class ConfigStore {
         return c.getSharedPreferences(ConfigProvider.PREFS, Context.MODE_PRIVATE);
     }
     static synchronized Bundle read(Context c) {
+        Bundle result = readPersisted(c);
+        mirror(c, result);
+        return result;
+    }
+    private static Bundle readPersisted(Context c) {
         SharedPreferences p = prefs(c);
         int schema = p.getInt("schemaVersion", 1);
         if (schema < 1 || schema > ConfigSpec.SCHEMA) throw new IllegalStateException("Unsupported schema");
@@ -21,6 +26,8 @@ final class ConfigStore {
             SharedPreferences.Editor e = p.edit();
             for (String key : ConfigSpec.DEFAULTS.keySet())
                 if (!p.contains(key)) put(e, key, ConfigSpec.DEFAULTS.get(key));
+            if (schema < 15) e.putInt(ConfigSpec.TIMING,
+                    ConfigSpec.timingFromLegacy(p.getAll().get(ConfigSpec.LONG_PRESS)));
             // Before schema 12 these were fixed directions, never user assignments.
             if (schema < 12) e.putString("button1Short", "none").putString("button2Short", "none");
             e.putString("button3Short", "native").putString("button3Long", "native");
@@ -33,7 +40,8 @@ final class ConfigStore {
                     || ids.equals(java.util.List.of("com.miui.notes","com.miui.creation",RingContent.NOTES,RingContent.CREATION,RingContent.SCREENSHOT))))
                 e.putString(ConfigSpec.CONTENT,RingContent.DEFAULT);
             e.putString(ConfigSpec.PROFILES,AppProfiles.parse(p.getString(ConfigSpec.PROFILES,AppProfiles.EMPTY)).encode());
-            if (!e.putInt("schemaVersion", ConfigSpec.SCHEMA).putLong("revision", p.getLong("revision", 0)).commit())
+            if (!e.remove(ConfigSpec.LONG_PRESS).remove(ConfigSpec.DOUBLE_PRESS)
+                    .putInt("schemaVersion", ConfigSpec.SCHEMA).putLong("revision", p.getLong("revision", 0)).commit())
                 throw new IllegalStateException("Cannot migrate configuration");
         }
         Bundle b = new Bundle();
@@ -43,16 +51,19 @@ final class ConfigStore {
         }
         b.putInt("schemaVersion", ConfigSpec.SCHEMA); b.putLong("revision", p.getLong("revision", 0));
         b.putString("ver", BuildConfig.VERSION_NAME);
+        b.putBoolean("bootOnly", false); b.putBoolean("mirrorPresent", true);
         return b;
     }
     static synchronized boolean write(Context c, String key, Object v) {
         ConfigSpec.validate(key, v);
-        Bundle old = read(c);
-        if (v.equals(old.get(key))) return true;
+        Bundle old = readPersisted(c);
+        if (v.equals(old.get(key))) { mirror(c, old); return true; }
         SharedPreferences.Editor e = prefs(c).edit(); put(e, key, v);
         long revision = old.getLong("revision") + 1;
         boolean ok = e.putLong("revision", revision).commit();
         if (ok) {
+            put(old, key, v); old.putLong("revision", revision);
+            mirror(c, old);
             c.getContentResolver().notifyChange(ConfigProvider.URI, null);
             Log.i("FocusPenConfig", "committed revision=" + revision + " schema=" + ConfigSpec.SCHEMA + " writerUid=" + Process.myUid());
         }
@@ -63,12 +74,21 @@ final class ConfigStore {
         if (!values.keySet().equals(ConfigSpec.DEFAULTS.keySet()))
             throw new IllegalArgumentException("Incomplete configuration");
         for (String key : ConfigSpec.DEFAULTS.keySet()) ConfigSpec.validate(key, values.get(key));
-        Bundle old = read(c);
+        Bundle old = readPersisted(c);
         SharedPreferences.Editor editor = prefs(c).edit();
         for (String key : ConfigSpec.DEFAULTS.keySet()) put(editor, key, values.get(key));
         boolean ok = editor.putLong("revision", old.getLong("revision") + 1).commit();
-        if (ok) c.getContentResolver().notifyChange(ConfigProvider.URI, null);
+        if (ok) {
+            for (String key : ConfigSpec.DEFAULTS.keySet()) put(old, key, values.get(key));
+            old.putLong("revision", old.getLong("revision") + 1);
+            mirror(c, old);
+            c.getContentResolver().notifyChange(ConfigProvider.URI, null);
+        }
         return ok;
+    }
+    private static void mirror(Context c, Bundle snapshot) {
+        if (!BootInputConfig.mirror(c, snapshot))
+            Log.w("FocusPenConfig", "Boot input mirror commit failed");
     }
     static void put(Bundle b, String k, Object v) {
         if (v instanceof Boolean) b.putBoolean(k, (Boolean) v);

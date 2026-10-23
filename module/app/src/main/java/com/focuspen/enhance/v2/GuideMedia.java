@@ -3,13 +3,14 @@ import android.content.Context;
 import android.view.View;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.util.Log;
 
 /** Uses the installed host's official animation resources and its existing Lottie renderer. */
 final class GuideMedia extends FrameLayout {
     private final ImageView fallback;
     private View animation;
     private android.animation.ValueAnimator motion;
-    private boolean prepared,playing;
+    private boolean prepared,playing,playedNative;
     private long playTime;
     private float nativeProgress;
     GuideMedia(Context c){super(c);fallback=new ImageView(c);fallback.setScaleType(ImageView.ScaleType.FIT_CENTER);addView(fallback,new LayoutParams(-1,-1));setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);}
@@ -20,6 +21,8 @@ final class GuideMedia extends FrameLayout {
         motion.setInterpolator(new android.view.animation.LinearInterpolator());
         motion.setRepeatCount(-1);motion.setRepeatMode(android.animation.ValueAnimator.RESTART);
         motion.addUpdateListener(a->{scene.progress=(Float)a.getAnimatedValue();scene.invalidateSelf();});
+        // Standard-pen key lessons use the fixed-pen overlay.
+        if(topic==0&&step>0&&!pro)return;
         String name=GuideContent.animation(topic,step,pro);if(name==null)return;
         try {
             Context c=getContext();if(!c.getPackageName().equals("com.miui.securitycore"))return;
@@ -30,36 +33,49 @@ final class GuideMedia extends FrameLayout {
             Class<?> type=c.getClassLoader().loadClass("com.airbnb.lottie.LottieAnimationView");
             animation=(View)type.getConstructor(Context.class).newInstance(c);
             installFailureListener(animation);
-            // Match stylus_guide_full_layout: the selection lesson uses img/img_0.png.
-            // Image layers resolve during drawing, after the composition failure callback.
-            if(topic==4)type.getMethod("setImageAssetsFolder",String.class).invoke(animation,"img/");
+            // Match stylus_guide_full_layout and FullGuide: handwriting lessons use
+            // img/ plus the host delegate that resolves image_0 to its packaged raw
+            // resource. The image layer resolves during drawing, after composition
+            // failure callbacks have already completed.
+            if(topic==4){
+                type.getMethod("setImageAssetsFolder",String.class).invoke(animation,"img/");
+                Class<?> delegate=c.getClassLoader().loadClass("t3.d");
+                Object imageDelegate=delegate.getConstructor(Context.class).newInstance(c);
+                type.getMethod("setImageAssetDelegate",delegate.getInterfaces()[0]).invoke(animation,imageDelegate);
+            }
             if(pro&&topic!=4){
                 Object delegate=c.getClassLoader().loadClass("t3.d").getConstructor(Context.class).newInstance(c);
                 de.robv.android.xposed.XposedHelpers.callMethod(animation,"setImageAssetDelegate",delegate);
             }
-            animation.setVisibility(INVISIBLE);addView(animation,new LayoutParams(-1,-1));type.getMethod("setAnimation",int.class).invoke(animation,id);
+            // setAnimation loads asynchronously. Keep this view visible so a swiped-in
+            // page shows its own first frame when ready, without starting playback.
+            animation.setVisibility(VISIBLE);addView(animation,new LayoutParams(-1,-1));type.getMethod("setAnimation",int.class).invoke(animation,id);
             type.getMethod("setRepeatCount",int.class).invoke(animation,-1);
-        }catch(Exception e){useFallback();}
+            type.getMethod("setProgress",float.class).invoke(animation,0f);
+            fallback.setVisibility(GONE);
+        }catch(Exception e){Log.w("FocusPenGuide","Native guide setup failed topic="+topic+" step="+step+" pro="+pro,e);useFallback();}
     }
     void show(int topic,int step,boolean pro){
         prepare(topic,step,pro);if(playing)return;
-        if(!android.animation.ValueAnimator.areAnimatorsEnabled()){if(animation!=null)animation.setVisibility(INVISIBLE);fallback.setVisibility(VISIBLE);return;}
+        if(!android.animation.ValueAnimator.areAnimatorsEnabled())return;
         playing=true;
         if(animation!=null){
-            animation.setVisibility(VISIBLE);fallback.setVisibility(GONE);
-            try{nativeCall(animation,"playAnimation","i");}
-            catch(Exception e){useFallback();return;}
-            // Progress support is optional; failure must not orphan a running view.
-            try{animation.getClass().getMethod("setProgress",float.class).invoke(animation,nativeProgress);}catch(Exception ignored){}
+            try{
+                animation.getClass().getMethod("setProgress",float.class).invoke(animation,nativeProgress);
+                nativeCall(animation,playedNative?"resumeAnimation":"playAnimation",playedNative?"k":"i");
+                playedNative=true;
+            }
+            catch(Exception e){Log.w("FocusPenGuide","Native guide playback failed topic="+topic+" step="+step+" pro="+pro,e);useFallback();return;}
             return;
         }
         if(motion!=null){motion.start();motion.setCurrentPlayTime(playTime);}
     }
     void stop(){
+        if(!playing)return;
         playing=false;
         if(motion!=null&&motion.isStarted()){playTime=motion.getCurrentPlayTime();motion.cancel();}
         if(animation!=null){
-            try{nativeProgress=((Number)animation.getClass().getMethod("getProgress").invoke(animation)).floatValue();}catch(Exception ignored){}
+            if(playedNative)try{nativeProgress=((Number)animation.getClass().getMethod("getProgress").invoke(animation)).floatValue();}catch(Exception ignored){}
             try{nativeCall(animation,"pauseAnimation","d");}catch(Exception ignored){animation.setVisibility(INVISIBLE);}
         }
     }
@@ -86,6 +102,7 @@ final class GuideMedia extends FrameLayout {
                 if(callback.getName().equals("hashCode"))return System.identityHashCode(proxy);
                 if(callback.getName().equals("equals"))return proxy==args[0];
                 if(callback.getName().equals("toString"))return "FocusPenGuideFailure";
+                Log.w("FocusPenGuide","Native guide composition failed",args!=null&&args.length>0&&args[0] instanceof Throwable?(Throwable)args[0]:new IllegalStateException(callback.getName()));
                 post(()->{if(animation==view)useFallback();});return null;
             }));}catch(Exception ignored){}
             return;

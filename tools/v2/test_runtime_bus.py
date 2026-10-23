@@ -32,12 +32,14 @@ sources = {
 "android/os/Process.java": "package android.os; public class Process { public static final int SYSTEM_UID=1000; }",
 "android/os/Looper.java": "package android.os; public class Looper {}",
 "android/os/HandlerThread.java": """package android.os; public class HandlerThread {
- public HandlerThread(String name){} public void start(){} public Looper getLooper(){return new Looper();}
+ public static int stopped; public HandlerThread(String name){} public void start(){} public Looper getLooper(){return new Looper();}
+ public boolean quitSafely(){stopped++;return true;}
 }""",
 "android/os/Handler.java": """package android.os; public class Handler {
  public static Runnable tick; public Handler(Looper looper){}
  public boolean post(Runnable work){tick=work;return true;}
  public boolean postDelayed(Runnable work,long delay){tick=work;return true;}
+ public void removeCallbacks(Runnable work){if(tick==work)tick=null;}
  public static void run(){Runnable work=tick;tick=null;work.run();}
 }""",
 "android/util/Log.java": "package android.util; public class Log { public static int w(String t,String s,Throwable e){return 0;} }",
@@ -103,6 +105,10 @@ public class RuntimeBusTest {
   check(endpoint.transact(IBinder.FIRST_CALL_TRANSACTION,action,null,IBinder.FLAG_ONEWAY),"action delivered");
   check(received[0]==1,"other events retain queued delivery");
   Handler.run();check(received[0]==2,"queued action eventually delivered");
+  uiBus.close();
+  check(HandlerThread.stopped==1,"runtime thread was not stopped");
+  check(!endpoint.transact(IBinder.FIRST_CALL_TRANSACTION,action,null,IBinder.FLAG_ONEWAY),"closed endpoint accepted an event");
+  check(!uiBus.available(RuntimeBus.UI)&&!uiBus.send(RuntimeBus.UI,"action",new Bundle()),"closed bus stayed available");
   System.out.println("RuntimeBus: directory lifecycle and low-latency UI motion PASS");
  }
 }""",

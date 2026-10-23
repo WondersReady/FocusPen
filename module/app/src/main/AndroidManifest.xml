@@ -5,13 +5,15 @@
       FocusPen Enhancement - LSPosed module.
       Configuration is embedded in SecurityCore's native stylus settings page.
 
-      Permissions: only the two normal-level (auto-granted, no user prompt) permissions that a
-      foreground service of type specialUse strictly requires on targetSdk 34+. Without them
-      startForeground() throws SecurityException / MissingForegroundServiceTypeException.
+      Permissions: foreground service and network access for the module's runtime work and
+      update checks. RECEIVE_BOOT_COMPLETED preserves the scheduled update job after reboot.
       SYSTEM_ALERT_WINDOW and other dangerous permissions are deliberately NOT requested yet.
     -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <queries>
         <package android:name="com.miui.notes" />
@@ -31,7 +33,7 @@
         android:hasCode="true"
         android:allowBackup="false"
         android:supportsRtl="true">
-        <activity android:name=".ManagerActivity" android:exported="true" android:label="焦点笔增强"
+        <activity android:name="com.focuspen.enhance.v2.ManagerActivity" android:exported="true" android:label="焦点笔增强"
             android:theme="@style/Theme.FocusPen.Manager" android:resizeableActivity="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -52,7 +54,7 @@
 
         <!-- ===== Foreground service (module-side runtime work) ===== -->
         <service
-            android:name=".FocusPenService"
+            android:name="com.focuspen.enhance.v2.FocusPenService"
             android:exported="false"
             android:foregroundServiceType="specialUse">
             <property
@@ -60,13 +62,19 @@
                 android:value="LSPosed module runtime companion for stylus enhancement" />
         </service>
 
-        <receiver android:name=".ConfigCommandReceiver" android:exported="false" />
+        <service
+            android:name="com.focuspen.enhance.v2.UpdateCheckJob"
+            android:exported="false"
+            android:permission="android.permission.BIND_JOB_SERVICE" />
+
+        <receiver android:name="com.focuspen.enhance.v2.ConfigCommandReceiver" android:exported="false" />
 
         <!-- Reads authorize the Binder UID and attribution package. Writes stay in this app. -->
         <provider
-            android:name=".ConfigProvider"
-            android:authorities="com.focuspen.enhance.v2.config"
+            android:name="com.focuspen.enhance.v2.ConfigProvider"
+            android:authorities="${applicationId}.config"
             android:exported="true"
+            android:directBootAware="true"
             android:enabled="true" />
 
     </application>

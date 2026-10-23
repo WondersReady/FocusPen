@@ -16,7 +16,7 @@ final class MenuIcons {
             public void setAlpha(int a){p.setAlpha(a);}public void setColorFilter(android.graphics.ColorFilter f){p.setColorFilter(f);}public int getOpacity(){return android.graphics.PixelFormat.TRANSLUCENT;}
             public int getIntrinsicWidth(){return Math.round(40*c.getResources().getDisplayMetrics().density);}public int getIntrinsicHeight(){return getIntrinsicWidth();}
         };
-        try{return c.getPackageManager().getApplicationIcon(pkg);}catch(Exception e){return c.getPackageManager().getDefaultActivityIcon();}
+        return SettingsAppCatalog.snapshot().icon(c,pkg);
     }
     private static String packageFor(String id){return RingContent.NOTES.equals(id)?"com.miui.notes":RingContent.CREATION.equals(id)?"com.miui.creation":RingContent.RECOGNITION.equals(id)?"com.miui.voiceassist":id;}
 }

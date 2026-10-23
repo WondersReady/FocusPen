@@ -14,7 +14,8 @@ import android.os.SystemClock;
 
 /** Read-only cross-UID snapshots; immutable edit commands run in the module process. */
 public final class ConfigProvider extends ContentProvider {
-    public static final String AUTHORITY = "com.focuspen.enhance.v2.config";
+    public static final String AUTHORITY = BuildConfig.APPLICATION_ID + ".config";
+    static final String ACTION_COMMIT = BuildConfig.APPLICATION_ID + ".COMMIT";
     public static final Uri URI = Uri.parse("content://" + AUTHORITY + "/snapshot");
     public static final Uri UI_URI = Uri.parse("content://" + AUTHORITY + "/ui-model");
     public static final String PREFS = "focuspen_config", METHOD_GET_CONFIG = "getConfig";
@@ -27,8 +28,11 @@ public final class ConfigProvider extends ContentProvider {
         long identity = Binder.clearCallingIdentity();
         try {
         if (!own && !isTrustedHost(caller, uid)) throw new SecurityException("Untrusted caller");
-        if (METHOD_GET_CONFIG.equals(method)) return ConfigStore.read(getContext());
+        if (METHOD_GET_CONFIG.equals(method)) return BootInputConfig.unlocked(getContext())
+                ? ConfigStore.read(getContext()) : BootInputConfig.read(getContext());
         if ("runtimeStatus".equals(method) && own) return RuntimeBus.status();
+        if (RuntimeBus.REGISTER.equals(method)) return RuntimeBus.register(caller, extras);
+        if (!BootInputConfig.unlocked(getContext())) throw new SecurityException("Unlock required");
         if ("uiModel".equals(method)) {
             android.content.SharedPreferences ui=getContext().getSharedPreferences("focuspen_ui_preview",0);
             if(arg!=null) {
@@ -38,7 +42,6 @@ public final class ConfigProvider extends ContentProvider {
             }
             Bundle out=new Bundle();out.putString("model",ui.getString("model","auto"));return out;
         }
-        if (RuntimeBus.REGISTER.equals(method)) return RuntimeBus.register(caller, extras);
         if ("previewRing".equals(method)) {
             if (!own && !"com.miui.securitycore".equals(caller)) throw new SecurityException("Settings host required");
             Bundle out = new Bundle(); out.putBoolean("sent", RuntimeBus.preview()); return out;
@@ -49,7 +52,7 @@ public final class ConfigProvider extends ContentProvider {
             ConfigSpec.validate(arg, value);
             Bundle payload = new Bundle(); ConfigStore.put(payload, "value", value);
             Intent command = new Intent(getContext(), ConfigCommandReceiver.class)
-                    .setAction("com.focuspen.enhance.v2.COMMIT").setData(Uri.parse("focuspen://setting/" + arg))
+                    .setAction(ACTION_COMMIT).setData(Uri.parse("focuspen://setting/" + arg))
                     .putExtras(payload).putExtra("key", arg).putExtra("expires", SystemClock.elapsedRealtime() + 10000);
             PendingIntent token = PendingIntent.getBroadcast(getContext(), 0, command,
                     PendingIntent.FLAG_CANCEL_CURRENT | PendingIntent.FLAG_ONE_SHOT | PendingIntent.FLAG_IMMUTABLE);
