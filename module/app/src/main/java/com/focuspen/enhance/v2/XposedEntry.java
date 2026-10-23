@@ -30,6 +30,10 @@ public final class XposedEntry implements IXposedHookLoadPackage {
 
     /** Entry used by the modern API adapter when this APK is loaded with static scope. */
     static void installSystemServer(ClassLoader classLoader) {
+        if (!HyperOsCompatibility.supported()) {
+            XposedBridge.log("FocusPen: unsupported HyperOS major; requires 3.x or 4.x");
+            return;
+        }
         try { PenKeyHost.install(classLoader); }
         catch (Throwable e) {
             Log.e(TAG, "Cannot install key arbitration; native retained", e);
@@ -43,6 +47,10 @@ public final class XposedEntry implements IXposedHookLoadPackage {
      * the legacy callback or the modern package lifecycle callback.
      */
     static void installHostBootstrap(ClassLoader classLoader, String process) {
+        if (!HyperOsCompatibility.supported()) {
+            XposedBridge.log("FocusPen: unsupported HyperOS major for " + process);
+            return;
+        }
         try {
             XposedHelpers.findAndHookMethod(Application.class, "attach", Context.class, new XC_MethodHook() {
                 @Override protected void afterHookedMethod(MethodHookParam param) {

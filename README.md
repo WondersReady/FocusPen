@@ -13,11 +13,7 @@
 
 ## 支持范围
 
-当前针对小米平板 8 Pro 的特定 HyperOS ROM 适配：
-
-```text
-Xiaomi/piano/piano:17/CP2A.260605.016/OS4.0.2.0.XPYCNXM:user/release-keys
-```
+1.0.1 Beta 起，澎湃 OS 3.x、4.x 免小版本检查，不再锁定完整 ROM 指纹或系统组件版本。澎湃 OS 5.x 及之后版本等待适配；实际 Hook 接口签名仍需存在。主要开发设备为小米平板 8 Pro，放宽版本门槛不代表全部机型均已验证。
 
 标准版焦点笔用于开发验证；焦点笔 Pro 已有源码接入与界面预览，尚未完成实笔验证。激光、鼠标、锁屏、息屏及多窗口等路径仍有待完成的设备验收；其他 ROM 不视为已兼容。鼠标指南中的笔姿态打磨推迟到下一版。
 
@@ -29,7 +25,7 @@ Xiaomi/piano/piano:17/CP2A.260605.016/OS4.0.2.0.XPYCNXM:user/release-keys
 
 功能设置入口：系统设置 → 手写笔与键盘 → 手写笔 → 功能设置。独立应用提供进入设置的入口。
 
-构建环境、测试和配置备份见 [构建说明](docs/BUILD.md)。架构与行为边界见 [设计说明](docs/DESIGN.md)。1.0 Beta 的功能和未验收范围见 [1.0 Beta 说明](docs/releases/1.0-Beta.md)；旧版记录见 [0.7.7 发布说明](docs/releases/0.7.7.md)。
+构建环境、测试和配置备份见 [构建说明](docs/BUILD.md)。架构与行为边界见 [设计说明](docs/DESIGN.md)。本次修复见 [1.0.1 Beta 说明](docs/releases/1.0.1-Beta.md)；功能与此前验收范围见 [1.0 Beta 说明](docs/releases/1.0-Beta.md)。
 
 ## 致谢
 

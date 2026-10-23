@@ -13,7 +13,6 @@ import java.util.List;
 /** Binds the ROM's native laser motion callback to an interface-only Java owner. */
 final class LaserMotionBridge {
     private static final String TAG = "FocusPenLaserBridge";
-    private static final String ROM = "Xiaomi/piano/piano:17/CP2A.260605.016/OS4.0.2.0.XPYCNXM:user/release-keys";
     private static volatile Installation installed;
 
     interface Sink {
@@ -155,7 +154,7 @@ final class LaserMotionBridge {
     static synchronized Installation install(ClassLoader loader, Sink sink) throws Exception {
         if (sink == null) throw new IllegalArgumentException("sink");
         if (installed != null) throw new IllegalStateException("Laser bridge already installed");
-        if (!ROM.equals(android.os.Build.FINGERPRINT)) throw new IllegalStateException("Unsupported ROM");
+        HyperOsCompatibility.requireSupported();
         Class<?> service = loader.loadClass("com.android.server.input.MiuiInputManagerService");
         Class<?> internal = loader.loadClass("com.android.server.input.MiuiInputManagerInternal");
         Class<?> local = loader.loadClass("com.android.server.input.MiuiInputManagerService$LocalService");

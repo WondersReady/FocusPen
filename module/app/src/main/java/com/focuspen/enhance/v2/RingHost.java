@@ -77,8 +77,7 @@ final class RingHost {
 
     RingHost(Context c, ClassLoader cl, ConfigClient client) throws Exception {
         context = c; config = client; wm = c.getSystemService(WindowManager.class);
-        if (c.getPackageManager().getPackageInfo(RuntimeBus.UI, 0).getLongVersionCode() != 202602260L)
-            throw new IllegalStateException("Unsupported SystemUI version");
+        HyperOsCompatibility.requireSupported();
         params = new WindowManager.LayoutParams(-1, -1, 2018,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL
                         | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,

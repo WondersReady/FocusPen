@@ -65,7 +65,7 @@ public class KeyInitLifecycleTest {
 files = [str(path) for path in out.rglob("*.java")]
 for name in ("PenKeyHost", "PenInputClassifier", "ProInput", "PinchSequence", "ProBindings",
              "ProGestureGate", "KeyTarget", "KeyArbiter", "PenAction", "DirectionAdapter",
-             "NativeShortcutGate"):
+             "NativeShortcutGate", "HyperOsCompatibility"):
     files.append(str(root / f"module/app/src/main/java/com/focuspen/enhance/v2/{name}.java"))
 jdk = Path(os.environ.get("JAVA_HOME", "/usr/lib/jvm/java-21-openjdk-amd64")) / "bin"
 subprocess.run([str(jdk / "javac"), "-d", str(out), *files], check=True)

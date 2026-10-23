@@ -18,7 +18,6 @@ import de.robv.android.xposed.XposedBridge;
 
 /** The verified ROM's early input owner; all recognition and actions run on its worker. */
 final class PenKeyHost {
-    private static final String FINGERPRINT = "Xiaomi/piano/piano:17/CP2A.260605.016/OS4.0.2.0.XPYCNXM:user/release-keys";
     private static volatile PenKeyHost instance;
     private static boolean initializationScheduled;
     private static volatile Object initialWindow;
@@ -71,7 +70,7 @@ final class PenKeyHost {
     };
 
     static void install(ClassLoader cl) throws Exception {
-        if (!FINGERPRINT.equals(android.os.Build.FINGERPRINT)) { Log.w("FocusPenKeys", "Unsupported ROM; native keys retained"); return; }
+        if (!HyperOsCompatibility.supported()) { Log.w("FocusPenKeys", "Unsupported HyperOS major; requires 3.x or 4.x"); return; }
         Class<?> stylus = cl.loadClass("com.miui.server.input.stylus.MiuiStylusShortcutManager");
         stylusManagerType=stylus;
         stylusType = InputDevice.class.getDeclaredMethod("isXiaomiStylus");

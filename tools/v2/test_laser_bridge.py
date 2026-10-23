@@ -151,6 +151,7 @@ classes = out / "classes"
 classes.mkdir(parents=True, exist_ok=True)
 java = [str(path) for path in (out / "src").rglob("*.java")]
 java.append(str(root / "module/app/src/main/java/com/focuspen/enhance/v2/LaserMotionBridge.java"))
+java.append(str(root / "module/app/src/main/java/com/focuspen/enhance/v2/HyperOsCompatibility.java"))
 subprocess.run(["javac", "-d", str(classes), *java], check=True)
 for mode in ("normal", "preclaimed", "rollback"):
     subprocess.run(["java", "-cp", str(classes),

@@ -21,7 +21,7 @@ import de.robv.android.xposed.XC_MethodHook;
 import de.robv.android.xposed.XposedHelpers;
 import de.robv.android.xposed.XposedBridge;
 
-/** Native preferences for the verified SecurityCoreAdd 4.4.4.3 build. */
+/** Native preferences; hook signatures are checked independently of host version. */
 final class SettingsHooks {
     private static final String PREFIX = "focuspen.v2.", PAGE = PREFIX + "page";
     private static final String SUBPAGE = "com.miui.miinput.stylus.StylusPinchSettingsActivity";
@@ -37,9 +37,7 @@ final class SettingsHooks {
 
     static void install(Context context, ClassLoader cl, ConfigClient client) throws Exception {
         if (installed) return;
-        if (context.getPackageManager().getPackageInfo("com.miui.securitycore", 0).getLongVersionCode() != 40004443L) {
-            Log.w("FocusPenSettings", "Unsupported host version; native settings retained"); return;
-        }
+        HyperOsCompatibility.requireSupported();
         loader = cl; config = client;
         Class<?> main = cl.loadClass("t2.A"), child = cl.loadClass("t2.Y");
         // Fail before installing if this build's primitive signatures do not match.

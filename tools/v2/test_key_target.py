@@ -560,7 +560,7 @@ for name, source in sources.items():
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(source, encoding="utf-8")
     files.append(str(path))
-for name in ["PenKeyHost", "PenInputClassifier", "ProInput", "PinchSequence", "ProBindings", "ProGestureGate", "KeyTarget", "KeyArbiter", "PenAction", "DirectionAdapter", "NativeShortcutGate"]:
+for name in ["PenKeyHost", "PenInputClassifier", "ProInput", "PinchSequence", "ProBindings", "ProGestureGate", "KeyTarget", "KeyArbiter", "PenAction", "DirectionAdapter", "NativeShortcutGate", "HyperOsCompatibility"]:
     files.append(str(root / f"module/app/src/main/java/com/focuspen/enhance/v2/{name}.java"))
 jdk = Path(os.environ.get("JAVA_HOME", "/usr/lib/jvm/java-21-openjdk-amd64"))
 subprocess.run([str(jdk / "bin/javac"), "-d", str(out), *files], check=True)
