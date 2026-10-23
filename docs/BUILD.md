@@ -8,6 +8,8 @@ bash tools/v2/build.sh
 
 Windows 也可在 `module/` 中执行 `gradlew.bat :app:assembleDebug`。输出为 `module/app/build/outputs/apk/debug/app-debug.apk`。旧预览包使用 debug 签名，覆盖升级必须使用相同签名；不同机器自行构建的包不保证可直接覆盖已安装包。1.0 Beta 更换应用 ID 后成为独立安装，签名与版本以最终发布产物为准。
 
+设备安装请使用 `adb install --no-incremental -r <APK路径>`。此 ROM 上曾出现增量安装将模块 APK 放在 `incremental-fs`，完整开机时 LSPosed 加载 `system` 作用域早于该挂载点可读，导致系统输入未连接；改为非增量覆盖安装后，APK 位于 `f2fs`，并已通过一次完整重启验证。安装后确认管理器中的“系统输入”已连接。覆盖安装会保留现有配置，但仍应事先导出重要配置。
+
 本地检查按目的执行：
 
 ```sh
