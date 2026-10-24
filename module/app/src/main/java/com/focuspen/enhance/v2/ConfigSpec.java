@@ -6,6 +6,8 @@ import java.util.Map;
 
 /** Persisted schema with explicit defaults and a closed set of accepted writes. */
 final class ConfigSpec {
+    // Suspended after device listening feedback. Keep stored fields for backup compatibility.
+    static final boolean WRITING_AUDIO_AVAILABLE = false;
     static final int SCHEMA = 15;
     static final String SCREEN_OFF_TARGET = "screenOffTarget";
     static final String LASER_ACTIVATION = "laserActivation";
@@ -43,8 +45,8 @@ final class ConfigSpec {
         Object expected = DEFAULTS.get(key);
         if (expected == null || value == null || !expected.getClass().equals(value.getClass()))
             throw new IllegalArgumentException("Unknown setting or incorrect value type");
-        if (TIMING.equals(key) && (Integer) value != 150 && (Integer) value != 250 && (Integer) value != 350)
-            throw new IllegalArgumentException("Unknown gesture timing preset");
+        if (TIMING.equals(key) && ((Integer) value < 100 || (Integer) value > 400))
+            throw new IllegalArgumentException("Gesture timing must be between 100 and 400 ms");
         if (AUDIO_VOLUME.equals(key) && ((Integer)value < 0 || (Integer)value > 100)) throw new IllegalArgumentException("Audio volume must be between 0 and 100");
         if (PROFILES.equals(key)) AppProfiles.parse((String)value);
         if (MATERIAL.equals(key) && !TEXTURE.equals(value) && !GLASS.equals(value))

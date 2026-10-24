@@ -16,6 +16,7 @@ final class GuideScene extends Drawable {
     private final float[] position=new float[2],tangent=new float[2];
     float progress;
     private static final int BLUE=0xff3682ff;
+    private static final float MOUSE_PEN_ANGLE=-42f, MOUSE_PEN_SCALE=.7f;
     GuideScene(Context c,int topic,int step,boolean pro){
         this.topic=topic;this.step=step;this.pro=pro;
         dark=(c.getResources().getConfiguration().uiMode&48)==32;
@@ -238,10 +239,10 @@ final class GuideScene extends Drawable {
         line(c,475,284,635,284,muted(),4);
     }
     private void mousePen(Canvas c,float x,float y,float focus,float left,boolean focusRipple,boolean leftRipple){
-        pen(c,x,y,-7,1.18f,false);
-        c.save();c.translate(x,y);c.rotate(-7);c.scale(1.18f,1.18f);c.translate(-12,1);
+        pen(c,x,y,MOUSE_PEN_ANGLE,MOUSE_PEN_SCALE,false);
+        c.save();c.translate(x,y);c.rotate(MOUSE_PEN_ANGLE);c.scale(MOUSE_PEN_SCALE,MOUSE_PEN_SCALE);c.translate(-12,1);
         if(button!=null&&focus>0){c.save();c.translate(199.106f,-.438f);fill(((int)(190*focus)<<24)|(BLUE&0xffffff));c.drawPath(button,paint);c.restore();}
-        if(left>0)box(c,106,-5,139,5,5,((int)(190*left)<<24)|(BLUE&0xffffff));
+        if(button!=null&&left>0){c.save();c.translate(123.606f,-.438f);fill(((int)(190*left)<<24)|(BLUE&0xffffff));c.drawPath(button,paint);c.restore();}
         if(focusRipple){keyRipple(c,199.106f,.20f,.34f);keyRipple(c,199.106f,.39f,.53f);}
         if(leftRipple)keyRipple(c,123.606f,step==5?.60f:.26f,step==5?.76f:.47f);
         c.restore();

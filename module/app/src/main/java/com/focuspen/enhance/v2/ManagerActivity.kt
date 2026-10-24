@@ -313,7 +313,7 @@ class ManagerActivity : ComponentActivity() {
         Group("备份包含") {
             Card {
                 BasicComponent(title = "按键与手势", summary = "全局行为、应用配置与模板", startAction = { Leading(MiuixIcons.Regular.Tune) })
-                BasicComponent(title = "书写与快捷功能", summary = "弧形菜单、笔尖预览、书写声音与息屏速记", startAction = { Leading(MiuixIcons.Regular.Edit) })
+                BasicComponent(title = "书写与快捷功能", summary = "弧形菜单、笔尖预览与息屏速记", startAction = { Leading(MiuixIcons.Regular.Edit) })
             }
         }
         Text("支持当前配置版本的完整备份。导入前会校验内容，确认后自动同步到已连接的宿主。",
@@ -392,6 +392,12 @@ class ManagerActivity : ComponentActivity() {
             }
         }
         Updates()
+        Group("项目主页") {
+            Card {
+                Link("GitHub 仓库", "WondersReady / FocusPen · 源码、版本与问题反馈",
+                    "https://github.com/WondersReady/FocusPen", MiuixIcons.Regular.Info)
+            }
+        }
         Group("特别感谢") {
             Card {
                 Link("Stylus Plus", "ljlVink · 标准版焦点笔鼠标参考", "https://github.com/ljlVink/StylusPlus", MiuixIcons.Regular.Edit)

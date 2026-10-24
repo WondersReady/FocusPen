@@ -52,6 +52,14 @@ public class ConfigStoreTest {
  static void check(boolean b,String m){if(!b)throw new AssertionError(m);}
  static Context baseline(int schema,String content){Context c=new Context();c.prefs.values.putAll(ConfigSpec.DEFAULTS);c.prefs.values.put("schemaVersion",schema);c.prefs.values.put("revision",93L);c.prefs.values.put(ConfigSpec.CONTENT,content);return c;}
  public static void main(String[] args){
+  Context audioLegacy=new Context();
+  ConfigStore.read(audioLegacy);
+  check(ConfigStore.write(audioLegacy,ConfigSpec.AUDIO,true),"Legacy audio preference remains importable");
+  ConfigSnapshot audioSnapshot=ConfigSnapshot.parse(ConfigStore.read(audioLegacy));
+  check(audioSnapshot.flag(ConfigSpec.AUDIO)&&!audioSnapshot.audioEnabled(),"Stored audio opt-in must not enable suspended feature");
+  Map<String,Object> audioBackup=new LinkedHashMap<>(ConfigSpec.DEFAULTS);audioBackup.put(ConfigSpec.AUDIO,true);
+  check(ConfigStore.restore(audioLegacy,audioBackup),"Legacy audio backup restores");
+  check(!ConfigSnapshot.parse(ConfigStore.read(audioLegacy)).audioEnabled(),"Backup must not reactivate suspended audio");
   for(String content:List.of(RingContent.DEFAULT,"v1\\n+com.miui.notes\\n+com.miui.creation","v1\\n+com.miui.notes\\n+com.miui.creation\\n+"+RingContent.NOTES+"\\n+"+RingContent.CREATION+"\\n+"+RingContent.SCREENSHOT,"v1\\n-"+RingContent.NOTES+"\\n!com.example.removed")){
    Context c=baseline(10,content);c.prefs.values.put(ConfigSpec.PROFILES,AppProfiles.parse(AppProfiles.EMPTY).set("com.example.app",4,"swipe").encode());
    Map<String,Object> expected=new HashMap<>(c.prefs.values);expected.put("schemaVersion",ConfigSpec.SCHEMA);

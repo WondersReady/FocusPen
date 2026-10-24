@@ -3,9 +3,9 @@ package com.focuspen.enhance.v2;
 /** Boundary and malformed-IPC inputs, independent of Android and host preferences. */
 public final class ConfigSpecTest {
     public static void main(String[] args) {
-        for (int timing : new int[]{150, 250, 350}) ConfigSpec.validate(ConfigSpec.TIMING, timing);
-        reject(ConfigSpec.TIMING, 149); reject(ConfigSpec.TIMING, 200);
-        reject(ConfigSpec.TIMING, 351); reject(ConfigSpec.TIMING, "250");
+        for (int timing = 100; timing <= 400; timing++) ConfigSpec.validate(ConfigSpec.TIMING, timing);
+        reject(ConfigSpec.TIMING, 99); reject(ConfigSpec.TIMING, 401);
+        reject(ConfigSpec.TIMING, "250");
         reject(ConfigSpec.LONG_PRESS, 200); reject(ConfigSpec.DOUBLE_PRESS, 280);
         reject("enabled", 1);
         reject("enabled", "true"); reject("confirmMode", "unknown");

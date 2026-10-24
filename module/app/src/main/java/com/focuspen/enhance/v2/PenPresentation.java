@@ -93,6 +93,11 @@ final class PenPresentation {
         if(Looper.myLooper()==h.getLooper())work.run();else h.post(work);
     }
     static boolean presenting(){PresentationState.Mode mode=OWNER.snapshot.mode();return mode==PresentationState.Mode.LASER||mode==PresentationState.Mode.ANNOTATION;}
+    /** A real pen tip touching the panel always returns presentation control to normal writing. */
+    static void physicalTipDown(){
+        PenPresentation o=OWNER;
+        if(o.snapshot.mode()!=PresentationState.Mode.IDLE)o.submit(o::resetNow);
+    }
     static boolean colorRoutingActive(){return presenting();}
     static void focusKey(KeyEvent event,boolean eligible,ConfigSnapshot config){
         OWNER.submit(()->{

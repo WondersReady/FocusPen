@@ -47,6 +47,7 @@ final class PenKeyHost {
     private final WindowDirectionHost directionHost;
     private final ProInput proInput;
     private final PenDockMonitor dock;
+    private final WritingAudioGate writingAudioGate = new WritingAudioGate();
     private final Object lock = new Object();
     private volatile boolean uiReady;
     private volatile long uiSeen;
@@ -206,6 +207,7 @@ final class PenKeyHost {
     }
     private void screenChanged(boolean interactive) {
         synchronized(lock) {
+            writingAudioGate.updateScreen(interactive);
             if(keysInteractive==interactive)return;
             keysInteractive=interactive;
             cancel(); PenPresentation.reset();
@@ -317,8 +319,10 @@ final class PenKeyHost {
             synchronized (lock) { refreshInputConfig(); }
         });
         dock=pendingDock=new PenDockMonitor(c,handler,this::dockChanged);
+        writingAudioGate.updateScreen(power.isInteractive());
+        writingAudioGate.updateLocked(locked());
         PenPresentation.bind(c,config,handler,()->power.isInteractive()&&!dockBlocked);
-        try { new SystemPenMotion(context,config,bus); }
+        try { new SystemPenMotion(context,config,bus,writingAudioGate); }
         catch(Throwable failure) { Log.e("FocusPenMotion","Cannot initialize pointer observer",failure); }
         Log.i("FocusPenKeys", "Verified ROM key arbitration ready");
         } catch(Exception | Error failure) {
@@ -334,6 +338,7 @@ final class PenKeyHost {
     }
     private void dockChanged(int state) {
         synchronized(lock) {
+            writingAudioGate.updateDock(state);
             boolean blocked=state!=PenDockMonitor.DETACHED;
             if(blocked==dockBlocked)return;
             dockBlocked=blocked;dockSince=SystemClock.uptimeMillis();
@@ -386,6 +391,7 @@ final class PenKeyHost {
     }
     private void updateLockState() {
         boolean value=locked();
+        writingAudioGate.updateLocked(value);
         if (value != keyguardState) {
             keyguardState=value; focusEpoch++;
             // Both lit lock states permit presentation. Retire shortcut gestures,
@@ -649,7 +655,7 @@ final class PenKeyHost {
         if(!current(target)||locked()||mouseSession!=PenMouse.session())return;
         switch(action){
             case "exitMouse"->PenPresentation.reset();
-            case "mouse"->PenPresentation.mouseMode(event.getDeviceId());
+            case "mouse"->{writingAudioGate.reset();PenPresentation.mouseMode(event.getDeviceId());}
             case "laser"->PenPresentation.laserMode(event.getDeviceId());
             case "left","right","leftHold","rightHold"->PenMouse.action(action,false,mouseSession);
             case "scrollUp","scrollDown"->{if(PenMouse.active())PenMouse.action(action,false,mouseSession);else directionHost.run(target,"scroll",action.equals("scrollUp"),()->current(target));}

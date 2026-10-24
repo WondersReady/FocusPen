@@ -12,3 +12,4 @@ work/
 **/*.p12
 **/*.pem
 **/*.key
+**/src/debug/assets/writing-audio/

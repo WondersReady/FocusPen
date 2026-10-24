@@ -29,7 +29,7 @@ final class ConfigSnapshot {
     boolean bootOnly() { return values.getBoolean("bootOnly", false); }
     boolean inputActionsReady() { return available && (!bootOnly() || values.getBoolean("mirrorPresent", false)); }
     boolean flag(String key) { return available && values.getBoolean(key, false); }
-    boolean audioEnabled() { return flag(ConfigSpec.AUDIO); }
+    boolean audioEnabled() { return ConfigSpec.WRITING_AUDIO_AVAILABLE && flag(ConfigSpec.AUDIO); }
     int number(String key){return values.getInt(key,(Integer)ConfigSpec.DEFAULTS.get(key));}
     String proBinding(String pkg,int slot){String fallback=text(ProBindings.KEYS[slot]);return flag(ConfigSpec.RULES)?profiles.value(pkg,13+slot,fallback):fallback;}
     int audioVolume() { return values.getInt(ConfigSpec.AUDIO_VOLUME, 65); }

@@ -99,7 +99,8 @@ sources = {
 "com/focuspen/enhance/v2/RingContent.java": '''package com.focuspen.enhance.v2; class RingContent {
  record Item(boolean enabled){} static RingContent parse(String s){return new RingContent();} Item find(String s){return null;} static boolean isAction(String s){return false;}
 }''',
-"com/focuspen/enhance/v2/SystemPenMotion.java": 'package com.focuspen.enhance.v2; class SystemPenMotion {SystemPenMotion(android.content.Context c,ConfigClient f,RuntimeBus b){}}',
+"com/focuspen/enhance/v2/SystemPenMotion.java": 'package com.focuspen.enhance.v2; class SystemPenMotion {SystemPenMotion(android.content.Context c,ConfigClient f,RuntimeBus b,WritingAudioGate g){}}',
+"com/focuspen/enhance/v2/WritingAudioGate.java": 'package com.focuspen.enhance.v2; class WritingAudioGate {void updateScreen(boolean v){} void updateLocked(boolean v){} void updateDock(int v){} void reset(){}}',
 "com/focuspen/enhance/v2/WindowDirectionHost.java": '''package com.focuspen.enhance.v2; class WindowDirectionHost {
  static int count; static String adapter; static boolean upward; WindowDirectionHost(android.os.Handler h,NativeKeyReplay r){}
  void run(KeyTarget t,String a,boolean up,java.util.function.BooleanSupplier valid){if(valid.getAsBoolean()){count++;adapter=a;upward=up;}}

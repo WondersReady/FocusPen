@@ -1,276 +1,280 @@
 package com.focuspen.enhance.v2;
 
 import android.content.Context;
-import android.media.AudioDeviceInfo;
 import android.media.AudioAttributes;
-import android.media.AudioManager;
+import android.media.AudioDeviceInfo;
 import android.media.AudioFormat;
+import android.media.AudioManager;
 import android.media.AudioTrack;
-import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.Process;
+import android.os.Build;
+import android.os.SystemClock;
 import android.util.Log;
+import java.io.InputStream;
 
-/**
- * Experimental low-latency writing feedback. The first backend is procedural and stereo:
- * pressure and speed shape a short textured burst, while the pen position controls the pan.
- * This is deliberately independent from the drawing pipeline so audio failure cannot affect
- * input arbitration or the official pen path.
- */
+/** Continuous sample playback on the existing notification/speaker path. */
 final class WritingAudioEngine {
     private static final String TAG = "FocusPenAudio";
-    private static final int SAMPLE_RATE = 48000;
-    private static final int CHANNEL_MASK = AudioFormat.CHANNEL_OUT_STEREO;
-    private static final int FRAMES_PER_BURST = 960; // 20 ms
-    private static final long EMIT_INTERVAL_MS = 28;
-    private static final float PRESSURE_EPS = 0.003f;
-    private static final float MOVE_EPS_PX = 0.8f;
-
-    private HandlerThread thread;
-    private Handler worker;
+    private final Object signal = new Object();
+    private final WritingAudioEventQueue events = new WritingAudioEventQueue(96);
+    private final WritingAudioEventQueue.Event event = new WritingAudioEventQueue.Event();
+    private final short[] pcm = new short[WritingAudioLoop.BLOCK_FRAMES * 2];
+    private final short[] silence = new short[WritingAudioLoop.BLOCK_FRAMES * 2];
+    private volatile Context context;
+    private AudioManager manager;
     private AudioTrack track;
-    private AudioManager audioManager;
-    private volatile boolean enabled;
-    private volatile int volumePercent = 65;
-    private boolean touching;
-    private long lastEventTime;
-    private long lastEmitTime;
-    private float lastX, lastY;
-    private float pendingDistance;
-    private double phase;
-    private int noiseState = 0x31415926;
-    private long burstCount;
+    private Thread thread;
+    private WritingAudioMotion motion;
+    private WritingAudioLoop loop;
+    private boolean sourceAttempted, playing;
+    private volatile boolean enabled, closed;
+    private volatile int volume = 65;
+    private boolean hardStop, finish, volumeDirty;
+    private float pressureMin, pressureMax = 1f, pressureResolution;
+    private float modelMin = Float.NaN, modelMax, modelResolution;
+    private int pending, offset, queuePeak;
+    private long blocks, writeFailures, zeroWrites, partialWrites, inputAgeTotal, inputAgeMax;
+    private long lastProgress, retryAfter, idleSince, drainUntil;
+    private float pan = .5f;
 
-    synchronized void setContext(Context context) {
-        if (audioManager == null && context != null) audioManager = context.getSystemService(AudioManager.class);
+    void setContext(Context ctx) {
+        synchronized (signal) { context = ctx; signal.notifyAll(); }
     }
 
-    synchronized void setEnabled(boolean on, int volume) {
-        volumePercent = Math.max(0, Math.min(100, volume));
-        if (enabled == on) {
-            if (on && worker != null) worker.post(() -> {
-                AudioTrack current = track;
-                if (current != null) {
-                    try { current.setVolume(volumePercent / 100f); } catch (Throwable ignored) { }
-                }
-            });
-            if (!on && worker != null) worker.post(this::releaseTrack);
-            return;
-        }
-        enabled = on;
-        if (on) {
-            ensureThread();
-            worker.post(this::ensureTrack);
-            Log.i(TAG, "writing audio enabled");
-        } else {
-            Handler h = worker;
-            if (h != null) h.post(this::releaseTrack);
-            touching = false;
-            Log.i(TAG, "writing audio disabled");
+    void setEnabled(boolean on, int percent) {
+        on &= ConfigSpec.WRITING_AUDIO_AVAILABLE;
+        synchronized (signal) {
+            int next = Math.max(0, Math.min(100, percent));
+            volumeDirty |= next != volume;
+            volume = next; enabled = on;
+            if (!on) { events.clear(); hardStop = true; }
+            if (on && (thread == null || !thread.isAlive())) {
+                closed = false;
+                thread = new Thread(this::run, "FocusPenAudio");
+                thread.start();
+            }
+            signal.notifyAll();
         }
     }
 
-    void onMotion(int action, float x, float y, float pressure, long eventTime, int displayWidth) {
-        if (!enabled) return;
-        ensureThread();
-        final int a = action;
-        final float px = x, py = y, pp = pressure;
-        final long t = eventTime;
-        final int width = displayWidth;
-        worker.post(() -> handle(a, px, py, pp, t, width));
+    void stopMotion() {
+        synchronized (signal) { events.clear(); hardStop = true; signal.notifyAll(); }
     }
 
-    synchronized void close() {
-        enabled = false;
-        if (worker != null) worker.post(this::releaseTrack);
-        if (thread != null) thread.quitSafely();
-        thread = null;
-        worker = null;
+    void endMotion() {
+        synchronized (signal) { events.clear(); finish = true; signal.notifyAll(); }
     }
 
-    private synchronized void ensureThread() {
-        if (worker != null) return;
-        thread = new HandlerThread("FocusPenAudio", Process.THREAD_PRIORITY_AUDIO);
-        thread.start();
-        worker = new Handler(thread.getLooper());
-    }
-
-    private void handle(int action, float x, float y, float pressure, long eventTime, int width) {
-        if (!enabled) return;
-        if (isSilentMode()) {
-            touching = false;
-            releaseTrack();
-            return;
+    void onMotion(int action, float x, float y, float pressure, long time, int displayWidth,
+            float min, float max, float resolution, float tilt, float orientation) {
+        synchronized (signal) {
+            if (!enabled || closed) return;
+            if (Float.isFinite(min) && Float.isFinite(max) && max > min
+                    && Float.isFinite(resolution) && resolution >= 0f
+                    && resolution * 1.5f < max - min) {
+                pressureMin = min; pressureMax = max; pressureResolution = resolution;
+            }
+            events.offer(action, x, y, pressure, time, displayWidth, tilt, orientation);
+            queuePeak = Math.max(queuePeak, events.size());
+            signal.notifyAll();
         }
-        if (action == 1 || action == 3 || pressure <= PRESSURE_EPS) { // UP/CANCEL or hover
-            touching = false;
-            lastEmitTime = 0;
-            pendingDistance = 0;
-            lastEventTime = eventTime;
-            lastX = x;
-            lastY = y;
-            return;
-        }
-        if (action != 0 && action != 2) return; // DOWN/MOVE only
-
-        float dx = x - lastX;
-        float dy = y - lastY;
-        long dt = eventTime - lastEventTime;
-        float speed = dt > 0 ? (float) (Math.hypot(dx, dy) / dt) : 0f;
-        boolean first = !touching || action == 0;
-        if (first) { lastEmitTime = 0; pendingDistance = 0; }
-        touching = true;
-        lastX = x;
-        lastY = y;
-        lastEventTime = eventTime;
-
-        if (first) return;
-        pendingDistance += (float)Math.hypot(dx, dy);
-        if (pendingDistance < MOVE_EPS_PX) return;
-        if (!first && eventTime - lastEmitTime < EMIT_INTERVAL_MS && speed < 0.4f) return;
-        boolean attack = lastEmitTime == 0;
-        lastEmitTime = eventTime;
-        pendingDistance = 0;
-        ensureTrack();
-        if (track == null || !isBuiltInSpeakerRoute()) return;
-
-        float normalizedX = width > 0 ? x / (float) width : 0.5f;
-        float pan = clamp(normalizedX * 2f - 1f, -1f, 1f);
-        float intensity = clamp(0.08f + pressure * 0.18f + speed * 0.025f, 0.06f, 0.28f);
-        float frequency = 135f + clamp(pressure, 0f, 1f) * 170f + clamp(speed, 0f, 8f) * 16f;
-        writeBurst(intensity, frequency, pan, attack);
     }
 
-    private void ensureTrack() {
-        if (!enabled || track != null) return;
+    void close() {
+        synchronized (signal) { enabled = false; closed = true; events.clear(); signal.notifyAll(); }
+    }
+
+    private void run() {
+        Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO);
         try {
-            if (isSilentMode()) return;
-            AudioDeviceInfo speaker = findBuiltInSpeaker();
-            if (speaker == null) {
-                Log.w(TAG, "Built-in speaker unavailable; writing sound muted");
-                return;
+            while (!closed) {
+                applyRequests();
+                if (!enabled || !loadSource()) { await(100); continue; }
+                long now = SystemClock.uptimeMillis();
+                boolean moving = motion.moving(now);
+                if (!motion.contactRecent(now) && !moving && !loop.audible() && pending == 0) {
+                    if (idleSince == 0) idleSince = now;
+                    if (track == null || now - idleSince >= 1500) {
+                        if (track != null) { logStats(); releaseTrack(); }
+                        await(100); continue;
+                    }
+                    // Keep feeding silence between strokes: an underrun can reset the
+                    // native start threshold and strand a later short/slow stroke.
+                } else idleSince = 0;
+                if (silent() || volume == 0) { clearMotion(); releaseTrack(); await(10); continue; }
+                if (now < retryAfter) { await(10); continue; }
+                if (!ensureTrack()) {
+                    clearMotion(); releaseTrack();
+                    synchronized (signal) {
+                        if (!hardStop && !finish && enabled && !closed) retryAfter = now + 1000;
+                    }
+                    continue;
+                }
+                if (!builtInRoute()) { clearMotion(); releaseTrack(); retryAfter = now + 1000; continue; }
+                synchronized (signal) { if (hardStop || finish || !enabled || closed) continue; }
+                if (pending == 0) {
+                    moving = motion.moving(SystemClock.uptimeMillis());
+                    loop.render(pcm, WritingAudioLoop.BLOCK_FRAMES, moving, motion.pressure(), motion.speed(), pan);
+                    offset = 0; pending = pcm.length;
+                    lastProgress = SystemClock.uptimeMillis();
+                    if (moving) {
+                        long age = Math.max(0, lastProgress - motion.eventTime());
+                        inputAgeTotal += age; inputAgeMax = Math.max(inputAgeMax, age); blocks++;
+                        if (blocks % 400 == 0) logStats();
+                    }
+                }
+                int written;
+                synchronized (signal) {
+                    if (hardStop || finish || !enabled || closed) continue;
+                    written = track.write(pcm, offset, pending, AudioTrack.WRITE_NON_BLOCKING);
+                }
+                if (written < 0) {
+                    writeFailures++; Log.w(TAG, "write failed=" + written);
+                    clearMotion(); releaseTrack(); retryAfter = now + 1000;
+                } else if (written == 0) {
+                    zeroWrites++;
+                    if (SystemClock.uptimeMillis() - lastProgress > 500) {
+                        writeFailures++;
+                        Log.w(TAG, "write stalled bufferFrames=" + track.getBufferSizeInFrames());
+                        clearMotion(); releaseTrack(); retryAfter = now + 100;
+                    } else await(2);
+                } else {
+                    if (written < pending) partialWrites++;
+                    offset += written; pending -= written;
+                    lastProgress = SystemClock.uptimeMillis();
+                }
             }
-            int min = AudioTrack.getMinBufferSize(SAMPLE_RATE, CHANNEL_MASK, AudioFormat.ENCODING_PCM_16BIT);
-            int buffer = Math.max(min, FRAMES_PER_BURST * 4 * 4);
-            AudioFormat format = new AudioFormat.Builder()
-                    .setSampleRate(SAMPLE_RATE)
-                    .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
-                    .setChannelMask(CHANNEL_MASK)
-                    .build();
-            AudioAttributes attrs = new AudioAttributes.Builder()
-                    // Match the keyboard sound path: the system notification stream
-                    // is the base gain, while setVolume() applies our own slider.
-                    .setUsage(AudioAttributes.USAGE_NOTIFICATION)
-                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
-                    .build();
-            track = new AudioTrack.Builder()
-                    .setAudioAttributes(attrs)
-                    .setAudioFormat(format)
-                    .setBufferSizeInBytes(buffer)
-                    .setTransferMode(AudioTrack.MODE_STREAM)
-                    .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY)
-                    .build();
-            if (track.getState() != AudioTrack.STATE_INITIALIZED) {
-                Log.w(TAG, "AudioTrack failed to initialize");
-                releaseTrack();
-                return;
-            }
-            if (!track.setPreferredDevice(speaker)) {
-                Log.w(TAG, "Unable to prefer built-in speaker");
-                releaseTrack();
-                return;
-            }
-            track.setVolume(volumePercent / 100f);
-            track.play();
-            if (!waitForBuiltInSpeakerRoute()) {
-                Log.w(TAG, "AudioTrack routed away from built-in speaker; refusing playback");
-                releaseTrack();
-                return;
-            }
-            Log.i(TAG, "AudioTrack ready rate=" + SAMPLE_RATE + " buffer=" + buffer
-                    + " channels=stereo route=built-in-speaker stream=notification volume=" + volumePercent);
         } catch (Throwable failure) {
-            Log.w(TAG, "AudioTrack unavailable; writing sound muted", failure);
-            releaseTrack();
+            Log.e(TAG, "Continuous writing audio stopped", failure);
+        } finally { releaseTrack(); }
+    }
+
+    private void applyRequests() {
+        boolean stop, end, changeVolume;
+        float min, max, resolution;
+        synchronized (signal) {
+            stop = hardStop; end = finish; changeVolume = volumeDirty;
+            hardStop = finish = volumeDirty = false;
+            min = pressureMin; max = pressureMax; resolution = pressureResolution;
+        }
+        if (stop) { clearMotion(); releaseTrack(); }
+        if (end) {
+            if (motion != null) motion.reset();
+            pending = offset = 0;
+        }
+        if (changeVolume && track != null) track.setVolume(volume / 100f);
+        if (motion == null || min != modelMin || max != modelMax || resolution != modelResolution) {
+            motion = new WritingAudioMotion(min, max, resolution);
+            modelMin = min; modelMax = max; modelResolution = resolution;
+        }
+        // Bounded drain. A concurrently arriving stop is checked before any audible write.
+        for (int i = 0; i < 96 && events.poll(event); i++) {
+            motion.process(event.action, event.x, event.y, event.pressure, event.timeMs);
+            if (event.displayWidth > 0 && Float.isFinite(event.x))
+                pan = Math.max(0f, Math.min(1f, event.x / event.displayWidth));
         }
     }
 
-    private void writeBurst(float amplitude, float frequency, float pan, boolean attack) {
-        if (isSilentMode() || !isBuiltInSpeakerRoute()) {
-            releaseTrack();
-            return;
+    private boolean loadSource() {
+        if (loop != null) return true;
+        if (sourceAttempted || context == null) return false;
+        sourceAttempted = true;
+        try {
+            manager = context.getSystemService(AudioManager.class);
+            Context module = context.createPackageContext(BuildConfig.APPLICATION_ID, 0);
+            try (InputStream input = module.getAssets().open("writing-audio/pen.wav")) {
+                WritingAudioSample source = WritingAudioSample.read(input);
+                loop = new WritingAudioLoop(source);
+                Log.i(TAG, "sample loaded rate=" + source.sampleRate + " frames=" + source.pcm.length
+                        + " sourceRms=" + source.sourceRms + " normalization=" + source.normalizationGain);
+            }
+        } catch (Throwable failure) { Log.e(TAG, "Writing sample unavailable; silent", failure); }
+        return loop != null;
+    }
+
+    private void await(long ms) throws InterruptedException {
+        synchronized (signal) {
+            if (closed || hardStop || finish || volumeDirty || events.size() > 0) return;
+            signal.wait(ms);
         }
-        short[] pcm = new short[FRAMES_PER_BURST * 2];
-        double phaseStep = 2.0 * Math.PI * frequency / SAMPLE_RATE;
-        float left = (float) Math.sqrt((1f - pan) * 0.5f);
-        float right = (float) Math.sqrt((1f + pan) * 0.5f);
-        for (int i = 0; i < FRAMES_PER_BURST; i++) {
-            float progress = i / (float) FRAMES_PER_BURST;
-            float envelope = attack ? Math.min(1f, i / 72f) : 1f;
-            envelope *= (float) Math.pow(1f - progress, 0.72);
-            float tonal = (float) Math.sin(phase);
-            noiseState = noiseState * 1664525 + 1013904223;
-            float noise = ((noiseState >>> 8) & 0x00ffffff) / 8388607.5f - 1f;
-            float sample = (tonal * 0.32f + noise * 0.68f) * amplitude * envelope;
-            pcm[i * 2] = toShort(sample * left);
-            pcm[i * 2 + 1] = toShort(sample * right);
-            phase += phaseStep;
-            if (phase > Math.PI * 2) phase -= Math.PI * 2;
+    }
+
+    private void clearMotion() {
+        if (motion != null) motion.reset();
+        if (loop != null) loop.reset();
+        pending = offset = 0;
+    }
+
+    private boolean ensureTrack() {
+        try {
+            if (track == null) {
+                AudioDeviceInfo speaker = null;
+                if (manager != null) for (AudioDeviceInfo device : manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS))
+                    if (device.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) { speaker = device; break; }
+                if (speaker == null) return false;
+                int minimum = AudioTrack.getMinBufferSize(WritingAudioLoop.SAMPLE_RATE,
+                        AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT);
+                if (minimum <= 0) return false;
+                int bufferBytes = Math.max(minimum, pcm.length * 2 * 3);
+                track = new AudioTrack.Builder().setAudioAttributes(new AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_NOTIFICATION)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION).build())
+                        .setAudioFormat(new AudioFormat.Builder().setSampleRate(WritingAudioLoop.SAMPLE_RATE)
+                                .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                                .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO).build())
+                        .setBufferSizeInBytes(bufferBytes).setTransferMode(AudioTrack.MODE_STREAM)
+                        .setPerformanceMode(AudioTrack.PERFORMANCE_MODE_LOW_LATENCY).build();
+                if (track.getState() != AudioTrack.STATE_INITIALIZED || !track.setPreferredDevice(speaker)) {
+                    releaseTrack(); return false;
+                }
+                // Capacity and playback threshold are different. Do not wait for the
+                // ROM's entire ~80 ms capacity before starting a short stroke.
+                int frames = track.setBufferSizeInFrames(WritingAudioLoop.BLOCK_FRAMES * 4);
+                if (Build.VERSION.SDK_INT >= 31)
+                    track.setStartThresholdInFrames(WritingAudioLoop.BLOCK_FRAMES);
+                Log.i(TAG, "track configured effectiveFrames=" + frames
+                        + " startFrames=" + (Build.VERSION.SDK_INT >= 31 ? track.getStartThresholdInFrames() : -1));
+                track.setVolume(volume / 100f);
+            }
+            if (!playing) {
+                // Establish routing with silence, before submitting any audible sample.
+                int count = track.write(silence, 0, silence.length, AudioTrack.WRITE_NON_BLOCKING);
+                if (count < 0) { releaseTrack(); return false; }
+                track.play(); playing = true;
+                for (int i = 0; i < 20 && enabled && !closed && !silent(); i++) {
+                    synchronized (signal) { if (hardStop || finish) return false; }
+                    if (builtInRoute()) {
+                        Log.i(TAG, "loop ready stream=notification route=built-in-speaker volume="
+                                + volume + " bufferFrames=" + track.getBufferSizeInFrames());
+                        return true;
+                    }
+                    Thread.sleep(5);
+                }
+                return false;
+            }
+            return true;
+        } catch (Throwable failure) {
+            Log.w(TAG, "AudioTrack unavailable", failure); releaseTrack(); return false;
         }
-        AudioTrack current = track;
-        if (current == null) return;
-        int written = current.write(pcm, 0, pcm.length, AudioTrack.WRITE_NON_BLOCKING);
-        if (written < 0) Log.w(TAG, "AudioTrack write failed code=" + written);
-        if ((++burstCount % 100) == 0) Log.d(TAG, "writing bursts=" + burstCount);
     }
 
     private void releaseTrack() {
-        AudioTrack t = track;
-        track = null;
-        if (t == null) return;
-        try { t.pause(); } catch (Throwable ignored) { }
-        try { t.flush(); } catch (Throwable ignored) { }
-        try { t.release(); } catch (Throwable ignored) { }
-        Log.i(TAG, "AudioTrack released");
+        AudioTrack current = track; track = null; playing = false; drainUntil = 0;
+        pending = offset = 0;
+        if (current == null) return;
+        try { current.pause(); current.flush(); } catch (Throwable ignored) { }
+        try { current.release(); } catch (Throwable ignored) { }
     }
 
-    private boolean isSilentMode() {
-        AudioManager manager = audioManager;
-        return manager != null && manager.getRingerMode() == AudioManager.RINGER_MODE_SILENT;
+    private boolean silent() { return manager != null && manager.getRingerMode() == AudioManager.RINGER_MODE_SILENT; }
+    private boolean builtInRoute() {
+        AudioDeviceInfo device = track == null ? null : track.getRoutedDevice();
+        return device != null && device.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER;
     }
-
-    private AudioDeviceInfo findBuiltInSpeaker() {
-        AudioManager manager = audioManager;
-        if (manager == null) return null;
-        for (AudioDeviceInfo device : manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)) {
-            if (device.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER) return device;
-        }
-        return null;
-    }
-
-    private boolean isBuiltInSpeakerRoute() {
-        AudioTrack current = track;
-        if (current == null) return false;
-        AudioDeviceInfo routed = current.getRoutedDevice();
-        return routed != null && routed.getType() == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER;
-    }
-
-    private boolean waitForBuiltInSpeakerRoute() {
-        for (int i = 0; i < 20 && enabled && !isSilentMode(); i++) {
-            if (isBuiltInSpeakerRoute()) return true;
-            try { Thread.sleep(5L); } catch (InterruptedException interrupted) {
-                Thread.currentThread().interrupt();
-                return false;
-            }
-        }
-        return isBuiltInSpeakerRoute();
-    }
-
-    private static float clamp(float value, float min, float max) {
-        return Math.max(min, Math.min(max, value));
-    }
-
-    private static short toShort(float value) {
-        return (short) (clamp(value, -1f, 1f) * 32767f);
+    private void logStats() {
+        Log.i(TAG, "loop stats blocks=" + blocks + " eventCoalescedOrDropped=" + events.droppedCount()
+                + " queuePeak=" + queuePeak + " partialWrites=" + partialWrites + " zeroWrites=" + zeroWrites
+                + " writeFailures=" + writeFailures + " underruns=" + (track == null ? -1 : track.getUnderrunCount())
+                + " inputAgeAvgMs=" + (blocks == 0 ? 0 : inputAgeTotal / blocks) + " inputAgeMaxMs=" + inputAgeMax);
     }
 }

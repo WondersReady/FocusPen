@@ -101,7 +101,9 @@ public class ConfigBackupTest {
   legacy=settings(true);legacy.remove(ConfigSpec.LONG_PRESS);reject(backup(14,legacy));
   legacy=settings(true);legacy.put(ConfigSpec.LONG_PRESS,"200");reject(backup(14,legacy));
   legacy=settings(true);legacy.put("button1Short","invalid");reject(backup(14,legacy));
-  current.put(ConfigSpec.TIMING,200);reject(backup(15,current));
+  current=settings(false);current.put(ConfigSpec.TIMING,237);
+  check(ConfigBackup.decode(backup(15,current)).get(ConfigSpec.TIMING).equals(237),"continuous timing backup");
+  current.put(ConfigSpec.TIMING,401);reject(backup(15,current));
   reject(backup(13,settings(true)));reject(backup(16,settings(false)));
   System.out.println("ConfigBackup schema 14 migration and strict schema 15 decode: PASS");
  }

@@ -135,7 +135,10 @@ final class SettingsHooks {
         register(cl.loadClass("com.miui.widget.SpeedSeekBarPreference"), "onBindViewHolder", holder, new XC_MethodHook() {
             @Override protected void afterHookedMethod(MethodHookParam p) {
                 String key = (String) call(p.thisObject, "getKey");
-                if (key != null && key.startsWith(PREFIX)) GuideNative.slider(p.thisObject, p.args[0]);
+                if (key != null && key.startsWith(PREFIX)) {
+                    Context c = ((android.view.View)XposedHelpers.getObjectField(p.args[0], "itemView")).getContext();
+                    SettingsSlider.bind(p.thisObject, p.args[0], value -> edit(c, key.substring(PREFIX.length()), value));
+                }
             }
         });
         register(cl.loadClass("miuix.preference.CheckBoxPreference"),"onBindViewHolder",holder,new XC_MethodHook(){
@@ -325,8 +328,10 @@ final class SettingsHooks {
         Object ring = navigation(c, group, "ring", "弧形菜单", "添加常用功能与应用");
         navigation(c, group, "official", "息屏灵感速记", "息屏落笔，随时记录");
         toggle(binding, group, ConfigSpec.PREVIEW, "笔尖预览", "悬停时显示落笔位置");
-        toggle(binding, group, ConfigSpec.AUDIO, "书写声音反馈", "书写时通过平板扬声器播放铅笔声");
-        slider(binding, group, ConfigSpec.AUDIO_VOLUME, "书写声音音量", 0, 100, 1);
+        if (ConfigSpec.WRITING_AUDIO_AVAILABLE) {
+            toggle(binding, group, ConfigSpec.AUDIO, "书写声音反馈", "书写时通过平板扬声器播放铅笔声");
+            slider(binding, group, ConfigSpec.AUDIO_VOLUME, "书写声音音量", 0, 100, 1);
+        }
         navigation(c, group, "guide", "使用指南", "了解触控笔的功能与操作");
         for (String key : new String[]{"guide", "function", "stylus_quick_note_screen_off", "touch_film_stylus_quick_operations",
                 "stylus_quick_write", "stylus_screen_shot", "stylus_function_settings", "stylus_effects_settings"}) {
@@ -428,7 +433,7 @@ final class SettingsHooks {
                     break;
                 case "keys": {
                     toggle(b, group, ConfigSpec.KEYS, "启用按键增强", "标准版按键与 Pro 手势使用自定义设置");
-                    slider(b, group, ConfigSpec.TIMING, "按键识别速度", 0, 2, 1);
+                    slider(b, group, ConfigSpec.TIMING, "按键识别时间", 100, 400, 1);
                     for (int button = 1; button <= 3; button++) {
                         if (button == 3) {
                             choices(b, screen, ConfigSpec.LASER_ACTIVATION, "焦点键 · 激光笔模式启用方式",
@@ -470,7 +475,7 @@ final class SettingsHooks {
                     Object slide=preference(c,"miuix.preference.CheckBoxPreference","pro.slide.hardware","启用笔身滑动","系统滑动开关控制 Pro 是否上报滑动手势");
                     call(slide,"setChecked",android.provider.Settings.System.getInt(c.getContentResolver(),"stylus_slide_option",1)!=0);
                     listener(slide,"setOnPreferenceChangeListener",args->android.provider.Settings.System.putInt(c.getContentResolver(),"stylus_slide_option",Boolean.TRUE.equals(args[1])?1:0));add(hardware,slide);
-                    information(c,hardware,"pro.testing","Pro 兼容预览","已接入当前系统的 Pro 手势链路，仍需焦点笔 Pro 实笔验证。笔尖预览、弧形菜单和书写声音共用现有设置。");
+                    information(c,hardware,"pro.testing","Pro 兼容预览","已接入当前系统的 Pro 手势链路，仍需焦点笔 Pro 实笔验证。笔尖预览和弧形菜单共用现有设置。");
                     break;
                 case "rules":
                     toggle(b, group, ConfigSpec.RULES, "启用应用配置文件", "随当前操作的窗口切换，未设置的项目沿用全局设置");
@@ -912,14 +917,14 @@ final class SettingsHooks {
             // SeekBar's key increment does not quantize touch drags.
             int raw = ((Number) args[1]).intValue();
             int value = Math.max(min, Math.min(max, min + Math.round((raw - min) / (float) step) * step));
-            edit(b.context, key, ConfigSpec.TIMING.equals(key) ? 150 + value * 100 : value);
+            edit(b.context, key, value);
             return false;
         });
         b.updates.add(s -> {
-            int value = ConfigSpec.TIMING.equals(key) ? (s.longPressMs() - 150) / 100 : s.number(key);
+            int value = s.number(key);
             call(sliderPreference, "setEnabled", s.available
                     && (!ConfigSpec.AUDIO_VOLUME.equals(key) || s.flag(ConfigSpec.AUDIO)));
-            call(sliderPreference, "h", value, true);
+            if (!SettingsSlider.dragging(sliderPreference)) call(sliderPreference, "h", value, true);
 
         });
         add(group, sliderPreference);
