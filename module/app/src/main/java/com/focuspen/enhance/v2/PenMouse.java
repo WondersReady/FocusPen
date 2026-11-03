@@ -38,6 +38,12 @@ final class PenMouse {
     private final Opener opener;
     private final BooleanSupplier allowed;
     private final Runnable onStopped;
+    private final android.content.Context injector;
+    private final java.util.function.Supplier<ConfigSnapshot> config;
+    private boolean touchDown;
+    private long touchDownTime;
+    private boolean backDown;
+    private long backDownTime;
     private final Object lock = new Object();
     private final Map<Integer, KeyPress> keys = new HashMap<>();
     private final LinkedHashSet<KeyIdentity> staleKeys = new LinkedHashSet<>();
@@ -51,15 +57,23 @@ final class PenMouse {
     private boolean active;
 
     PenMouse(Handler worker, Opener opener, BooleanSupplier allowed) {
-        this(worker, opener, allowed, () -> { });
+        this(worker, opener, allowed, () -> { }, null, null);
     }
 
     /** onStopped runs on the worker after an unexpected open/device/permission failure. */
     PenMouse(Handler worker, Opener opener, BooleanSupplier allowed, Runnable onStopped) {
+        this(worker, opener, allowed, onStopped, null, null);
+    }
+
+    /** Full configuration: context enables touch/back injection; config supplies mouse mode options. */
+    PenMouse(Handler worker, Opener opener, BooleanSupplier allowed, Runnable onStopped,
+             android.content.Context context, java.util.function.Supplier<ConfigSnapshot> config) {
         this.worker = Objects.requireNonNull(worker);
         this.opener = Objects.requireNonNull(opener);
         this.allowed = Objects.requireNonNull(allowed);
         this.onStopped = Objects.requireNonNull(onStopped);
+        this.injector = context;
+        this.config = config;
         PenMouse previous = instance;
         instance = this;
         if (previous != null) previous.requestExit();
@@ -246,6 +260,8 @@ final class PenMouse {
         if (!Float.isFinite(dx) || !Float.isFinite(dy) || (dx == 0 && dy == 0)) return;
         synchronized (lock) {
             if (!wanted && !active) return;
+            float factor = speedFactor();
+            dx *= factor; dy *= factor;
             if (pendingMotion != null) {
                 pendingMotion.dx += dx;
                 pendingMotion.dy += dy;
@@ -263,6 +279,7 @@ final class PenMouse {
                         || Math.abs(motion.dy) > Float.MAX_VALUE) return;
                 try {
                     if (!mouse.move((float) motion.dx, (float) motion.dy)) fail(motion.session);
+                    else touchDrag();
                 } catch (Throwable failure) { deviceFailure(motion.session, failure); }
             });
         }
@@ -286,10 +303,29 @@ final class PenMouse {
         return false;
     }
 
+    private boolean touchMode() {
+        try { return config == null || "touch".equals(config.get().text(ConfigSpec.MOUSE_LEFT)); }
+        catch (Throwable failure) { return false; }
+    }
+
+    private boolean backMode() {
+        try { return config != null && "back".equals(config.get().text(ConfigSpec.MOUSE_RIGHT)); }
+        catch (Throwable failure) { return false; }
+    }
+
+    private float speedFactor() {
+        try { return Math.max(10, Math.min(150, config == null ? 100 : config.get().number(ConfigSpec.MOUSE_SPEED))) / 100f; }
+        catch (Throwable failure) { return 1f; }
+    }
+
     private void pressButton(int button, Object owner, long version) {
         if (buttonOwners[button] != null) return;
         try {
-            if (!mouse.button(button, true)) { fail(version); return; }
+            if (button == 1 && touchMode()) {
+                if (!touchPress()) { fail(version); return; }
+            } else if (button == 2 && backMode()) {
+                if (!backKey(true)) { fail(version); return; }
+            } else if (!mouse.button(button, true)) { fail(version); return; }
             buttonOwners[button] = owner;
         } catch (Throwable failure) { deviceFailure(version, failure); }
     }
@@ -297,13 +333,78 @@ final class PenMouse {
     private void releaseButton(int button, Object owner, long version) {
         if (buttonOwners[button] != owner) return;
         try {
-            if (!mouse.button(button, false)) { fail(version); return; }
+            boolean released;
+            if (button == 1 && touchDown) released = touchRelease();
+            else if (button == 2 && backDown) released = backKey(false);
+            else released = mouse.button(button, false);
+            if (!released) { fail(version); return; }
             buttonOwners[button] = null;
         } catch (Throwable failure) { deviceFailure(version, failure); }
     }
 
+    // Touch pointer: injected touchscreen events at the cursor, so press-and-move acts
+    // like a finger (touch-only UIs such as comment lists scroll), unlike a mouse drag.
+    private boolean touchPress() {
+        if (touchDown) return true;
+        android.graphics.PointF p = cursor();
+        if (p == null) return false;
+        touchDownTime = android.os.SystemClock.uptimeMillis();
+        if (!injectTouch(android.view.MotionEvent.ACTION_DOWN, p.x, p.y)) return false;
+        touchDown = true;
+        return true;
+    }
+
+    private boolean touchRelease() {
+        if (!touchDown) return true;
+        android.graphics.PointF p = cursor();
+        touchDown = false;
+        return injectTouch(android.view.MotionEvent.ACTION_UP, p == null ? 0 : p.x, p == null ? 0 : p.y);
+    }
+
+    private void touchDrag() {
+        if (!touchDown) return;
+        android.graphics.PointF p = cursor();
+        if (p != null) injectTouch(android.view.MotionEvent.ACTION_MOVE, p.x, p.y);
+    }
+
+    private android.graphics.PointF cursor() {
+        try { return mouse == null ? null : mouse.position(); } catch (Throwable failure) { return null; }
+    }
+
+    private boolean injectTouch(int action, float px, float py) {
+        if (injector == null) return false;
+        try {
+            long now = android.os.SystemClock.uptimeMillis();
+            android.view.MotionEvent ev = android.view.MotionEvent.obtain(touchDownTime, now, action, px, py, 0);
+            ev.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
+            de.robv.android.xposed.XposedHelpers.callMethod(ev, "setDisplayId", 0);
+            Object manager = injector.getSystemService(android.hardware.input.InputManager.class);
+            boolean ok = Boolean.TRUE.equals(de.robv.android.xposed.XposedHelpers.callMethod(manager, "injectInputEvent", ev, 0));
+            ev.recycle();
+            return ok;
+        } catch (Throwable failure) { return false; }
+    }
+
+    private boolean backKey(boolean down) {
+        if (injector == null) return false;
+        try {
+            if (down == backDown) return true;
+            long now = android.os.SystemClock.uptimeMillis();
+            if (down) backDownTime = now;
+            android.view.KeyEvent ev = new android.view.KeyEvent(backDownTime, now,
+                    down ? android.view.KeyEvent.ACTION_DOWN : android.view.KeyEvent.ACTION_UP,
+                    android.view.KeyEvent.KEYCODE_BACK, 0, 0, -1, 0, 0, android.view.InputDevice.SOURCE_KEYBOARD);
+            Object manager = injector.getSystemService(android.hardware.input.InputManager.class);
+            boolean ok = Boolean.TRUE.equals(de.robv.android.xposed.XposedHelpers.callMethod(manager, "injectInputEvent", ev, 0));
+            if (ok) backDown = down;
+            return ok;
+        } catch (Throwable failure) { return false; }
+    }
+
     private boolean releaseButtons() {
         boolean okay = true;
+        try { if (!touchRelease()) okay = false; } catch (Throwable failure) { okay = false; }
+        try { if (!backKey(false)) okay = false; } catch (Throwable failure) { okay = false; }
         for (int button = 1; button <= 2; button++) {
             if (buttonOwners[button] == null) continue;
             try { if (mouse == null || !mouse.button(button, false)) okay = false; }

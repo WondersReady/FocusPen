@@ -8,9 +8,10 @@ import java.util.Map;
 final class ConfigSpec {
     // Suspended after device listening feedback. Keep stored fields for backup compatibility.
     static final boolean WRITING_AUDIO_AVAILABLE = false;
-    static final int SCHEMA = 15;
+    static final int SCHEMA = 16;
     static final String SCREEN_OFF_TARGET = "screenOffTarget";
     static final String LASER_ACTIVATION = "laserActivation";
+    static final String MOUSE_SPEED = "mouseSpeed", MOUSE_LEFT = "mouseLeft", MOUSE_RIGHT = "mouseRight";
     static final String[] PRO_GESTURES = {"proPinch", "proDouble", "proSlideUp", "proSlideDown"};
     static final String PROFILES = "applicationProfiles", SCREEN_OFF = "screenOffNote";
     static final String CONTENT = "ringContent";
@@ -31,6 +32,7 @@ final class ConfigSpec {
         v.put(CONTENT, RingContent.DEFAULT);
         v.put(PROFILES, AppProfiles.EMPTY); v.put(SCREEN_OFF, false);
         v.put(SCREEN_OFF_TARGET, "note"); v.put(LASER_ACTIVATION, "hold");
+        v.put(MOUSE_SPEED, 70); v.put(MOUSE_LEFT, "touch"); v.put(MOUSE_RIGHT, "back");
         for(int i=0;i<ProBindings.KEYS.length;i++)v.put(ProBindings.KEYS[i],ProBindings.DEFAULTS[i]);
         v.put(ProBindings.INTERVAL,360);v.put(ProBindings.HOLD,650);
         v.put("button1Double", "none"); v.put("button2Double", "none");
@@ -60,6 +62,12 @@ final class ConfigSpec {
             throw new IllegalArgumentException("Unknown screen-off target");
         if (LASER_ACTIVATION.equals(key) && !"hold".equals(value) && !"toggle".equals(value))
             throw new IllegalArgumentException("Unknown laser activation");
+        if (MOUSE_SPEED.equals(key) && ((Integer) value < 10 || (Integer) value > 150))
+            throw new IllegalArgumentException("Mouse speed must be between 10 and 150 percent");
+        if (MOUSE_LEFT.equals(key) && !"touch".equals(value) && !"left".equals(value))
+            throw new IllegalArgumentException("Unknown mouse left mode");
+        if (MOUSE_RIGHT.equals(key) && !"back".equals(value) && !"right".equals(value))
+            throw new IllegalArgumentException("Unknown mouse right mode");
         int pro=java.util.Arrays.asList(ProBindings.KEYS).indexOf(key);if(pro>=0)ProBindings.validate(pro,(String)value);
         if(ProBindings.INTERVAL.equals(key)&&((Integer)value<220||(Integer)value>600))throw new IllegalArgumentException("Invalid pinch interval");
         if(ProBindings.HOLD.equals(key)&&((Integer)value<300||(Integer)value>1500))throw new IllegalArgumentException("Invalid pinch hold");

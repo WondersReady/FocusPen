@@ -30,6 +30,7 @@ final class ConfigStore {
                     ConfigSpec.timingFromLegacy(p.getAll().get(ConfigSpec.LONG_PRESS)));
             // Before schema 12 these were fixed directions, never user assignments.
             if (schema < 12) e.putString("button1Short", "none").putString("button2Short", "none");
+            if (schema < 16) { e.putInt(ConfigSpec.MOUSE_SPEED, 70); e.putString(ConfigSpec.MOUSE_LEFT, "touch"); e.putString(ConfigSpec.MOUSE_RIGHT, "back"); }
             e.putString("button3Short", "native").putString("button3Long", "native");
             // Replace only the previous seeded/preview list, preserving custom menus.
             RingContent content=RingContent.parse(p.getString(ConfigSpec.CONTENT,RingContent.DEFAULT));
