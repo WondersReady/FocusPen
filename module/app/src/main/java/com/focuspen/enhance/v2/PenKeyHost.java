@@ -296,6 +296,9 @@ final class PenKeyHost {
                 if(allowed && !OfficialPenActions.run(c,id))
                     busError();
             }
+            if ("toggleMouse".equals(event) && config.get().inputActionsReady()) {
+                PenPresentation.toggleMouse();
+            }
             if ("uiState".equals(event)) {
                 uiSeen = SystemClock.uptimeMillis(); uiReady = b.getBoolean("ready");
                 synchronized (lock) { arbiter.ring(b.getBoolean("ring"), b.getBoolean("hold"), b.getInt("button", 1)); }

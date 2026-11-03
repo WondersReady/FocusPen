@@ -30,6 +30,7 @@ final class PenDockMonitor implements AutoCloseable {
 
     int state(){return state;}
 
+    private int unknownReads;
     private synchronized void read() {
         if(closed)return;
         int next=UNKNOWN;
@@ -38,6 +39,12 @@ final class PenDockMonitor implements AutoCloseable {
             if(value==DOCKED||value==DETACHED)next=value;
         } catch(RuntimeException failure){Log.w("FocusPenDock","Hall state unavailable",failure);}
         if(closed)return;
+        // HyperOS 4 (e.g. Xiaomi Pad 7S Pro) never publishes the hall setting.
+        // An absent sensor cannot justify keeping every pen key blocked, so after a
+        // short grace period treat the state as detached and keep observing in case
+        // the ROM starts reporting it later (a real dock event then still applies).
+        if(next==UNKNOWN){if(++unknownReads>=5)next=DETACHED;}
+        else unknownReads=0;
         if(next!=state){state=next;Log.i("FocusPenDock","hall="+next);changed.accept(next);}
         worker.removeCallbacks(refresh);
         if(next==UNKNOWN)worker.postDelayed(refresh,1000);
