@@ -417,7 +417,7 @@ final class SettingsHooks {
             Object[] values = new Object[actionList.size()];
             String[] labels = new String[actionList.size()];
             for (int i = 0; i < actionList.size(); i++) { values[i] = actionList.get(i).id; labels[i] = actionList.get(i).label; }
-            choices(b, screen, page, page.startsWith("pro")?"焦点笔 Pro":"标准版焦点笔", values, labels, null);
+            choices(b, screen, page, page.startsWith("pro")?"焦点笔 Pro":title(page), values, labels, null);
         } else {
             Object group = category(c, screen, page + ".settings", title(page));
             switch (page) {
@@ -1105,6 +1105,11 @@ final class SettingsHooks {
         if (p.startsWith("templateField:")) return fieldTitle(Integer.parseInt(p.split(":")[2]));
         if (p.startsWith("template:")) return "编辑模板";
         if (p.startsWith("field:")) return fieldTitle(Integer.parseInt(p.split(":")[2]));
+        // 按键动作选择页：标题直接标明"哪个键 + 什么操作"，进入菜单后无需对照上一页
+        if (p.length() > 8 && p.startsWith("button") && "123".indexOf(p.charAt(6)) >= 0) {
+            String gesture = p.endsWith("Short") ? "单击" : p.endsWith("Long") ? "长按" : p.endsWith("Double") ? "快速双击" : null;
+            if (gesture != null) return buttonName(p.charAt(6) - '0') + " · " + gesture;
+        }
         switch (p) {
             case "ring": return "弧形菜单"; case "preview": return "笔尖预览"; case "keys": return "全局按键设置";case "pro":return "焦点笔 Pro";
             case "rules": return "应用配置文件"; case "guide": return "使用指南";
