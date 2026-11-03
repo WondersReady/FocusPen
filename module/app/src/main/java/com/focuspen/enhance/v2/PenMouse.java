@@ -55,6 +55,10 @@ final class PenMouse {
     private long context;
     private boolean wanted;
     private boolean active;
+    // Dynamic pointer speed: EMA of raw input velocity (px per ms) drives a
+    // log curve so slow strokes stay precise and fast flicks travel further.
+    private float velocity;
+    private long lastMotionAt;
 
     PenMouse(Handler worker, Opener opener, BooleanSupplier allowed) {
         this(worker, opener, allowed, () -> { }, null, null);
@@ -167,6 +171,8 @@ final class PenMouse {
             generation++;
             context++;
             pendingMotion = null;
+            velocity = 0;
+            lastMotionAt = 0;
             retireKeys();
             worker.post(this::closeDevice);
         }
@@ -178,6 +184,8 @@ final class PenMouse {
             long version = ++generation;
             long epoch = ++context;
             pendingMotion = null;
+            velocity = 0;
+            lastMotionAt = 0;
             retireKeys();
             worker.post(() -> {
                 if (current(version, epoch) && !releaseButtons()) fail(version);
@@ -260,7 +268,7 @@ final class PenMouse {
         if (!Float.isFinite(dx) || !Float.isFinite(dy) || (dx == 0 && dy == 0)) return;
         synchronized (lock) {
             if (!wanted && !active) return;
-            float factor = speedFactor();
+            float factor = speedFactor() * accelFactor(dx, dy);
             dx *= factor; dy *= factor;
             if (pendingMotion != null) {
                 pendingMotion.dx += dx;
@@ -316,6 +324,34 @@ final class PenMouse {
     private float speedFactor() {
         try { return Math.max(10, Math.min(150, config == null ? 100 : config.get().number(ConfigSpec.MOUSE_SPEED))) / 100f; }
         catch (Throwable failure) { return 1f; }
+    }
+
+    private boolean accelEnabled() {
+        try { return config == null || config.get().flag(ConfigSpec.MOUSE_ACCEL); }
+        catch (Throwable failure) { return false; }
+    }
+
+    // Piecewise-log curve on the smoothed input velocity, scaled by the
+    // user-tunable range: at rest the pointer runs at the fine-speed factor
+    // for precise aiming, large flicks saturate at the boost limit, so one
+    // setting covers both fine placement and quick travel.
+    private float accelFactor(float dx, float dy) {
+        if (!accelEnabled()) return 1f;
+        long now = android.os.SystemClock.uptimeMillis();
+        float dt = lastMotionAt == 0 ? 10f : Math.max(1f, now - lastMotionAt);
+        float instant = (float) Math.hypot(dx, dy) / dt;
+        velocity = velocity * 0.75f + instant * 0.25f;
+        lastMotionAt = now;
+        float low = 0.55f, high = 2.6f;
+        try {
+            ConfigSnapshot snapshot = config.get();
+            low = Math.max(0.2f, Math.min(1f, snapshot.number(ConfigSpec.MOUSE_ACCEL_MIN) / 100f));
+            high = Math.max(1f, Math.min(5f, snapshot.number(ConfigSpec.MOUSE_ACCEL_MAX) / 100f));
+        } catch (Throwable failure) { }
+        if (high < low) { float swap = low; low = high; high = swap; }
+        float shape = (float) (Math.log1p(velocity / 0.15f) / Math.log1p(2.16f / 0.15f));
+        shape = Math.max(0f, Math.min(1f, shape));
+        return low + (high - low) * shape;
     }
 
     private void pressButton(int button, Object owner, long version) {

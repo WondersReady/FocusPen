@@ -456,6 +456,9 @@ final class SettingsHooks {
                             });
                             information(c,mouseGroup,"focus.mouse.buttons","点击与拖动","速记键默认为触摸指针（按住移动等于手指拖动，评论区可滑动，与手指一致支持边缘返回和底部小白条），截图键默认为返回键；均可在下方切换为鼠标左右键。切换应用、窗口、状态栏或解锁时保持鼠标模式，息屏时退出。");
                             slider(b, mouseGroup, ConfigSpec.MOUSE_SPEED, "鼠标指针速度（焦点笔控制光标）", 10, 150, 5);
+                            toggle(b, mouseGroup, ConfigSpec.MOUSE_ACCEL, "动态指针速度", "根据移动快慢实时变速：慢速按下方精细速度执行，快速滑动最高到下方快速上限，兼顾快速移动与精细操作");
+                            slider(b, mouseGroup, ConfigSpec.MOUSE_ACCEL_MIN, "动态速度 · 精细速度（%）", 20, 100, 5);
+                            slider(b, mouseGroup, ConfigSpec.MOUSE_ACCEL_MAX, "动态速度 · 快速上限（%）", 100, 500, 10);
                             choices(b, screen, ConfigSpec.MOUSE_LEFT, "速记键 · 鼠标模式下的作用",
                                     new Object[]{"touch","left"}, new String[]{"触摸指针","鼠标左键"},
                                     new String[]{"按住并移动等于手指拖动，评论区可滑动，支持边缘返回和小白条","标准鼠标左键"});
@@ -479,7 +482,7 @@ final class SettingsHooks {
                         Object buttonGroup = category(c, screen, "keys.button" + button, buttonName(button));
                         for (String suffix : new String[]{"Short", "Long", "Double"}) {
                             String key = "button" + button + suffix;
-                            Object actionRow = navigation(c, buttonGroup, key, suffix.equals("Short")?"短按功能":suffix.equals("Long") ? "长按功能" : "快速双击功能", null);
+                            Object actionRow = navigation(c, buttonGroup, key, buttonName(button) + " · " + (suffix.equals("Short") ? "单击" : suffix.equals("Long") ? "长按" : "快速双击"), null);
                             b.updates.add(s -> call(actionRow, "h", PenAction.parse(s.text(key)).label));
                         }
                     }
