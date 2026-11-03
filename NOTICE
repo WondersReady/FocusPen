@@ -12,3 +12,11 @@ ROM 衍生部分（不属于上述 Apache-2.0 授权范围）：
 
 教程中的官方图像与动画在运行时从设备已安装系统应用读取，未打包原始系统 APK 或原始动画文件。
 依赖及参考项目的许可与来源见 module/app/src/main/assets/open-source-notices.txt。
+
+
+本分支改动（1.2.3 / 1.2.4，基于上游 1.2）：
+- PenDockMonitor：HyperOS 4（小米平板 7S Pro）不报告 stylus_hall_status 时，不再永久封锁笔键。
+- 鼠标模式：触摸指针 / 返回键映射、指针速度调节。
+- 新增改动部分同样以 Apache License 2.0 发布。
+
+设计参考：StylusPlus（github.com/ljlVink/StylusPlus）。仅参考交互思路，未复制其代码。

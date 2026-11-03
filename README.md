@@ -41,3 +41,24 @@
 ## 许可范围
 
 原创部分采用 Apache-2.0。ROM 衍生部分的授权独立，尚无明确再分发许可，不适用本项目的 Apache-2.0 声明。请先阅读 [NOTICE](NOTICE)；本仓库不是对所有第三方材料的统一开源授权。
+
+
+## 本分支的改动（1.2.3 / 1.2.4）
+
+基于 WondersReady/FocusPen 1.2（Apache License 2.0）的修复与增强：
+
+- **1.2.3**：修复小米平板 7S Pro（HyperOS 4）上笔按键全部失效的问题。该系统不报告
+  `stylus_hall_status` 霍尔状态，模块会永久误判"笔已吸附"而封锁所有输入；现在连续
+  数次读不到状态后按"未吸附"处理，并持续监听后续上报。
+- **1.2.4**：鼠标模式增强（交互思路参考 [StylusPlus](https://github.com/ljlVink/StylusPlus)，
+  未复制其代码）：
+  - 速记键可切换为"触摸指针"：按住移动等于手指拖动，可滑动仅响应触摸的界面（默认开启）
+  - 截图键可切换为"返回键"（默认开启）
+  - 新增"鼠标指针速度"滑块（10%–150%）
+
+## 致谢与许可
+
+- 原项目 [FocusPen](https://github.com/WondersReady/FocusPen) © WondersReady，基于
+  Apache License 2.0 修改与再发布（见 LICENSE 与 NOTICE）。
+- 交互参考 [StylusPlus](https://github.com/ljlVink/StylusPlus)（ljlVink），仅作设计参考，
+  该项目未附带开源许可，本仓库不包含其代码。
