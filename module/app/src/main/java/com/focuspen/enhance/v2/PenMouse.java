@@ -375,12 +375,52 @@ final class PenMouse {
         if (injector == null) return false;
         try {
             long now = android.os.SystemClock.uptimeMillis();
-            android.view.MotionEvent ev = android.view.MotionEvent.obtain(touchDownTime, now, action, px, py, 0);
-            ev.setSource(android.view.InputDevice.SOURCE_TOUCHSCREEN);
-            de.robv.android.xposed.XposedHelpers.callMethod(ev, "setDisplayId", 0);
+            android.view.MotionEvent.PointerProperties[] props = new android.view.MotionEvent.PointerProperties[1];
+            props[0] = new android.view.MotionEvent.PointerProperties();
+            props[0].id = 0;
+            // Gesture navigation (edge back, home bar) only reacts to finger touches.
+            // The short obtain() leaves the tool type UNKNOWN, which apps accept but
+            // the gesture monitors drop, so the bar and edge back must be injected
+            // with an explicit finger tool type.
+            props[0].toolType = android.view.MotionEvent.TOOL_TYPE_FINGER;
+            android.view.MotionEvent.PointerCoords[] coords = new android.view.MotionEvent.PointerCoords[1];
+            coords[0] = new android.view.MotionEvent.PointerCoords();
+            coords[0].x = px;
+            coords[0].y = py;
+            coords[0].pressure = 1.0f;
+            coords[0].size = 0.05f;
+            coords[0].touchMajor = 4.0f;
+            coords[0].touchMinor = 4.0f;
+            android.view.MotionEvent ev = android.view.MotionEvent.obtain(touchDownTime, now, action,
+                    1, props, coords, 0, 0, 1.0f, 1.0f, 0, 0,
+                    android.view.InputDevice.SOURCE_TOUCHSCREEN, 0);
             Object manager = injector.getSystemService(android.hardware.input.InputManager.class);
             boolean ok = Boolean.TRUE.equals(de.robv.android.xposed.XposedHelpers.callMethod(manager, "injectInputEvent", ev, 0));
             ev.recycle();
+            return ok;
+        } catch (Throwable failure) { return false; }
+    }
+
+    /** Injected key tap (home/recents/back) for configurable focus-key actions in mouse mode. */
+    static boolean keyTap(int keyCode) {
+        PenMouse m = instance;
+        if (m == null) return false;
+        return m.injectKeyTap(keyCode);
+    }
+
+    private boolean injectKeyTap(int keyCode) {
+        if (injector == null) return false;
+        try {
+            long now = android.os.SystemClock.uptimeMillis();
+            Object manager = injector.getSystemService(android.hardware.input.InputManager.class);
+            android.view.KeyEvent down = new android.view.KeyEvent(now, now,
+                    android.view.KeyEvent.ACTION_DOWN, keyCode, 0, 0, -1, 0, 0,
+                    android.view.InputDevice.SOURCE_KEYBOARD);
+            android.view.KeyEvent up = new android.view.KeyEvent(now, now,
+                    android.view.KeyEvent.ACTION_UP, keyCode, 0, 0, -1, 0, 0,
+                    android.view.InputDevice.SOURCE_KEYBOARD);
+            boolean ok = Boolean.TRUE.equals(de.robv.android.xposed.XposedHelpers.callMethod(manager, "injectInputEvent", down, 0));
+            if (ok) ok = Boolean.TRUE.equals(de.robv.android.xposed.XposedHelpers.callMethod(manager, "injectInputEvent", up, 0));
             return ok;
         } catch (Throwable failure) { return false; }
     }

@@ -147,16 +147,38 @@ final class PenPresentation {
     private void schedule(){worker.removeCallbacks(tick);long next=gesture.nextDeadline();if(next!=Long.MAX_VALUE)worker.postAtTime(tick,next);}
     private void effects(List<FocusGesture.Effect> effects){for(FocusGesture.Effect effect:effects){
         switch(effect.kind()){
-            case SINGLE -> apply(state.focusSingle());
-            case DOUBLE -> apply(state.focusDouble());
+            case SINGLE -> {
+                if(snapshot.mode()==PresentationState.Mode.MOUSE)mouseFocus(ConfigSpec.MOUSE_FOCUS_SINGLE);
+                else apply(state.focusSingle());
+            }
+            case DOUBLE -> {
+                // Mouse mode owns the focus key: single/double/hold run configurable
+                // actions (home/recents/back) instead of presentation transitions.
+                if(snapshot.mode()==PresentationState.Mode.MOUSE)mouseFocus(ConfigSpec.MOUSE_FOCUS_DOUBLE);
+                else apply(state.focusDouble());
+            }
             case HOLD -> {
+                if(snapshot.mode()==PresentationState.Mode.MOUSE){mouseFocus(ConfigSpec.MOUSE_FOCUS_HOLD);}
+                else{
                 PresentationState.Result result=state.focusHold(effect.pressId(),"toggle".equals(config.get().text(ConfigSpec.LASER_ACTIVATION))
                         ?PresentationState.LaserActivation.TOGGLE:PresentationState.LaserActivation.HOLD);
                 held=result.token();heldId=effect.pressId();apply(result);
+                }
             }
             case RELEASE_HOLD,CANCEL_HOLD -> {if(effect.pressId()==heldId){apply(state.release(held));held=null;}}
         }
     }}
+    private void mouseFocus(String key){
+        String action;
+        try{action=config.get().text(key);}catch(Throwable failure){return;}
+        switch(action){
+            case "home" -> PenMouse.keyTap(android.view.KeyEvent.KEYCODE_HOME);
+            case "recents" -> PenMouse.keyTap(android.view.KeyEvent.KEYCODE_APP_SWITCH);
+            case "back" -> PenMouse.keyTap(android.view.KeyEvent.KEYCODE_BACK);
+            case "exitMouse" -> apply(state.reset());
+            default -> { }
+        }
+    }
     private void apply(PresentationState.Result result){
         snapshot=result.snapshot();
         for(PresentationState.Effect effect:result.effects())switch(effect.kind()){

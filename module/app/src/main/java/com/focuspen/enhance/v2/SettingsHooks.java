@@ -449,18 +449,31 @@ final class SettingsHooks {
                             Object buttonGroup=category(c,screen,"focus.help","演示操作");
                             information(c,buttonGroup,"focus.color","演示中切换颜色","激光或圈注时，短按速记键切换上一色，短按截图键切换下一色。已有笔迹保持原色。");
                             Object mouseGroup=category(c,screen,"focus.mouse","鼠标模式");
-                            command(c,mouseGroup,"focus.mouse.enter","启用鼠标模式","点击立即启用或退出；也可双击焦点键切换",()->{
+                            information(c,mouseGroup,"focus.mouse.keys","三个按键说明","速记键、截图键是笔身侧键（即系统全局按键设置中的两枚侧键）；焦点键是笔上独立的焦点按键，用于激光、圈注与鼠标模式。下方每项都标明了对应哪个按键。");
+                            command(c,mouseGroup,"focus.mouse.enter","启用鼠标模式","点击立即启用或退出；空闲时双击焦点键进入，退出默认改为长按焦点键",()->{
                                 Bundle reply=c.getContentResolver().call(ConfigProvider.URI,"toggleMouse",null,null);
                                 if(reply==null||!reply.getBoolean("sent"))Toast.makeText(c,"鼠标模式尚未就绪，请确认系统输入已连接",Toast.LENGTH_SHORT).show();
                             });
-                            information(c,mouseGroup,"focus.mouse.buttons","点击与拖动","速记键默认为触摸指针（按住移动等于手指拖动，评论区可滑动），截图键默认为返回键；均可在下方切换为鼠标左右键。切换应用、窗口、状态栏或解锁时保持鼠标模式，息屏时退出。");
-                            slider(b, mouseGroup, ConfigSpec.MOUSE_SPEED, "鼠标指针速度", 10, 150, 5);
-                            choices(b, screen, ConfigSpec.MOUSE_LEFT, "鼠标模式 · 速记键",
+                            information(c,mouseGroup,"focus.mouse.buttons","点击与拖动","速记键默认为触摸指针（按住移动等于手指拖动，评论区可滑动，与手指一致支持边缘返回和底部小白条），截图键默认为返回键；均可在下方切换为鼠标左右键。切换应用、窗口、状态栏或解锁时保持鼠标模式，息屏时退出。");
+                            slider(b, mouseGroup, ConfigSpec.MOUSE_SPEED, "鼠标指针速度（焦点笔控制光标）", 10, 150, 5);
+                            choices(b, screen, ConfigSpec.MOUSE_LEFT, "速记键 · 鼠标模式下的作用",
                                     new Object[]{"touch","left"}, new String[]{"触摸指针","鼠标左键"},
-                                    new String[]{"按住并移动等于手指拖动，评论区等触摸界面可滑动","标准鼠标左键"});
-                            choices(b, screen, ConfigSpec.MOUSE_RIGHT, "鼠标模式 · 截图键",
+                                    new String[]{"按住并移动等于手指拖动，评论区可滑动，支持边缘返回和小白条","标准鼠标左键"});
+                            choices(b, screen, ConfigSpec.MOUSE_RIGHT, "截图键 · 鼠标模式下的作用",
                                     new Object[]{"back","right"}, new String[]{"返回键","鼠标右键"},
                                     new String[]{"按下为返回，按住等同长按返回","标准鼠标右键"});
+                            choices(b, screen, ConfigSpec.MOUSE_FOCUS_SINGLE, "焦点键 · 单击（鼠标模式下）",
+                                    new Object[]{"home","recents","back","none"},
+                                    new String[]{"回到桌面","多任务","返回键","无"},
+                                    new String[]{"鼠标模式下单击焦点键：回到桌面","鼠标模式下单击焦点键：打开多任务","鼠标模式下单击焦点键：执行返回","鼠标模式下单击焦点键：不执行操作"});
+                            choices(b, screen, ConfigSpec.MOUSE_FOCUS_DOUBLE, "焦点键 · 双击（鼠标模式下）",
+                                    new Object[]{"recents","home","back","exitMouse","none"},
+                                    new String[]{"多任务","回到桌面","返回键","退出鼠标模式","无"},
+                                    new String[]{"鼠标模式下双击焦点键：打开多任务","鼠标模式下双击焦点键：回到桌面","鼠标模式下双击焦点键：执行返回","鼠标模式下双击焦点键：退出鼠标模式（替代旧版双击退出）","鼠标模式下双击焦点键：不执行操作"});
+                            choices(b, screen, ConfigSpec.MOUSE_FOCUS_HOLD, "焦点键 · 长按（鼠标模式下）",
+                                    new Object[]{"exitMouse","home","recents","back","none"},
+                                    new String[]{"退出鼠标模式","回到桌面","多任务","返回键","无"},
+                                    new String[]{"鼠标模式下长按焦点键：退出鼠标模式","鼠标模式下长按焦点键：回到桌面","鼠标模式下长按焦点键：打开多任务","鼠标模式下长按焦点键：执行返回","鼠标模式下长按焦点键：不执行操作"});
                             continue;
                         }
                         Object buttonGroup = category(c, screen, "keys.button" + button, buttonName(button));
