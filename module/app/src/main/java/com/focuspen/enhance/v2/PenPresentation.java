@@ -59,16 +59,20 @@ final class PenPresentation {
             public void move(float dx,float dy){OWNER.motion(dx,dy);}
             public void setPosition(float x,float y){OWNER.position(x,y);}
             public void getPosition(float[] output){synchronized(OWNER.positionLock){
+                // 鼠标模式：ROM 指针贴图若显示会与系统虚拟鼠标光标叠成双指针、移动时
+                // 来回切换造成闪烁。贴图位置由这里供给，给个屏幕外坐标即可隐形，
+                // 同时 canShowPointer 保持 true 以免 ROM 停发相对位移。
+                if(OWNER.snapshot.mode()==PresentationState.Mode.MOUSE){output[0]=-5000f;output[1]=-5000f;return;}
                 output[0]=Float.isFinite(OWNER.x)?OWNER.x:OWNER.frame.exactCenterX();
                 output[1]=Float.isFinite(OWNER.y)?OWNER.y:OWNER.frame.exactCenterY();
             }}
             public void fade(int transition){ /* Window changes do not own our mode. */ }
             public void unfade(int transition){ /* Motion will reveal a valid position. */ }
             public void resetPosition(){OWNER.invalidatePosition();}
-            // 鼠标模式下系统虚拟鼠标光标是唯一的指针；再让 ROM 激光贴图显示会与它叠成两个光标，
-            // 移动过程中来回切换造成"闪烁"感，所以鼠标模式下不向 ROM 申请指针贴图。
-            public boolean canShowPointer(){return OWNER.screenOn && OWNER.snapshot.mode()!=PresentationState.Mode.IDLE
-                    && OWNER.snapshot.mode()!=PresentationState.Mode.MOUSE;}
+            // canShowPointer 不能返回 false：ROM 的指针控制器以它为开关，为 false 时
+            // 连隔空相对位移都不再转发，鼠标模式下光标完全不动。鼠标模式下的
+            // 双指针"闪烁"改由 getPosition 把贴图画到屏幕外来解决（见下）。
+            public boolean canShowPointer(){return OWNER.screenOn && OWNER.snapshot.mode()!=PresentationState.Mode.IDLE;}
             public void displayId(int id){synchronized(OWNER.positionLock){OWNER.displayId=id;OWNER.updateViewport();}}
             public void displayViewports(List<?> values){synchronized(OWNER.positionLock){OWNER.viewports=List.copyOf(values);OWNER.updateViewport();}}
             public void screenState(boolean on){OWNER.screenOn=on;if(!on)OWNER.submit(OWNER::resetNow);}
