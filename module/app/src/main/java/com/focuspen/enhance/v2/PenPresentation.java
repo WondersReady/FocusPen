@@ -65,7 +65,10 @@ final class PenPresentation {
             public void fade(int transition){ /* Window changes do not own our mode. */ }
             public void unfade(int transition){ /* Motion will reveal a valid position. */ }
             public void resetPosition(){OWNER.invalidatePosition();}
-            public boolean canShowPointer(){return OWNER.screenOn && OWNER.snapshot.mode()!=PresentationState.Mode.IDLE;}
+            // 鼠标模式下系统虚拟鼠标光标是唯一的指针；再让 ROM 激光贴图显示会与它叠成两个光标，
+            // 移动过程中来回切换造成"闪烁"感，所以鼠标模式下不向 ROM 申请指针贴图。
+            public boolean canShowPointer(){return OWNER.screenOn && OWNER.snapshot.mode()!=PresentationState.Mode.IDLE
+                    && OWNER.snapshot.mode()!=PresentationState.Mode.MOUSE;}
             public void displayId(int id){synchronized(OWNER.positionLock){OWNER.displayId=id;OWNER.updateViewport();}}
             public void displayViewports(List<?> values){synchronized(OWNER.positionLock){OWNER.viewports=List.copyOf(values);OWNER.updateViewport();}}
             public void screenState(boolean on){OWNER.screenOn=on;if(!on)OWNER.submit(OWNER::resetNow);}
@@ -74,6 +77,9 @@ final class PenPresentation {
 
     static void bind(Context context,ConfigClient config,Handler worker,BooleanSupplier allowed) {
         PenPresentation o=OWNER;o.context=context;o.config=config;o.worker=worker;o.allowed=allowed;
+        // PenMotionConnection 原本是死代码（无人实例化），导致触控服务进程从不启动、
+        // 主页"触控服务"永远显示未连接；这里在演示层绑定时创建它，由它按需拉起触控服务。
+        new PenMotionConnection(context, config);
         o.screenOn=context.getSystemService(android.os.PowerManager.class).isInteractive();
         new PenMouse(worker,source->new SystemMouseDevice(o.loader,0),o::permitted,()->o.submit(()->{
             if(o.snapshot.mode()==PresentationState.Mode.MOUSE)o.apply(o.state.reset());
