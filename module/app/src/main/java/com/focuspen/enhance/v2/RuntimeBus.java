@@ -40,6 +40,7 @@ final class RuntimeBus implements AutoCloseable {
         return result;
     }
     static boolean preview() { return transmit(directory.get(UI), "preview", new Bundle()); }
+    static boolean toggleMouse() { return transmit(directory.get(INPUT), "toggleMouse", new Bundle()); }
     static synchronized Bundle status() {
         Bundle b = new Bundle();
         String[] hosts = {INPUT, UI, MOTION, SETTINGS}, names = {"input", "ui", "motion", "settings"};

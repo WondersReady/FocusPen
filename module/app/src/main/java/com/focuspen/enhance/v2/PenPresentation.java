@@ -77,7 +77,7 @@ final class PenPresentation {
         o.screenOn=context.getSystemService(android.os.PowerManager.class).isInteractive();
         new PenMouse(worker,source->new SystemMouseDevice(o.loader,0),o::permitted,()->o.submit(()->{
             if(o.snapshot.mode()==PresentationState.Mode.MOUSE)o.apply(o.state.reset());
-        }));
+        }),context,config::get);
         new Handler(Looper.getMainLooper()).post(()->{
             try {
                 PortedPresentationWindow created=new PortedPresentationWindow(context,epoch->o.submit(()->{
@@ -135,6 +135,7 @@ final class PenPresentation {
         });
     }
     static void mouseMode(int device){OWNER.submit(()->{if(OWNER.permitted()){OWNER.device=device;OWNER.apply(OWNER.state.enterMouse());}});}
+    static void toggleMouse(){OWNER.submit(()->{if(!OWNER.permitted())return;if(OWNER.snapshot.mode()==PresentationState.Mode.MOUSE)OWNER.resetNow();else{OWNER.device=-1;OWNER.apply(OWNER.state.enterMouse());}});}
     static void laserMode(int device){OWNER.submit(()->{if(OWNER.permitted()){OWNER.device=device;OWNER.apply(OWNER.state.enterLaser());}});}
     static void cancelGesture(){OWNER.submit(OWNER::cancelNow);}
     // Keyboard focus can move to the shade while the same mouse drag is in flight.
