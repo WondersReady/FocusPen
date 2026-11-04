@@ -59,6 +59,11 @@ final class PenMouse {
     // log curve so slow strokes stay precise and fast flicks travel further.
     private float velocity;
     private long lastMotionAt;
+    // Wheel mode: motion feeds the platform wheel instead of the cursor.
+    private boolean wheelMode; // worker only
+    private double wheelAcc; // worker only
+    private int pendingWheel; // worker only
+    private boolean wheelTaskQueued; // worker only
 
     PenMouse(Handler worker, Opener opener, BooleanSupplier allowed) {
         this(worker, opener, allowed, () -> { }, null, null);
@@ -131,6 +136,12 @@ final class PenMouse {
         if (m != null) m.changeContext();
     }
 
+    /** 滚轮模式开关：仅在鼠标模式生效。进入后移动笔变成滚动页面，再切一次或退出鼠标模式即恢复。 */
+    static void toggleWheel() {
+        PenMouse m = instance;
+        if (m != null) m.requestWheelToggle();
+    }
+
     private void requestEnter(int sourceDevice) {
         synchronized (lock) {
             if (wanted || active) return;
@@ -173,6 +184,9 @@ final class PenMouse {
             pendingMotion = null;
             velocity = 0;
             lastMotionAt = 0;
+            wheelMode = false;
+            wheelAcc = 0;
+            pendingWheel = 0;
             retireKeys();
             worker.post(this::closeDevice);
         }
@@ -186,6 +200,9 @@ final class PenMouse {
             pendingMotion = null;
             velocity = 0;
             lastMotionAt = 0;
+            wheelMode = false;
+            wheelAcc = 0;
+            pendingWheel = 0;
             retireKeys();
             worker.post(() -> {
                 if (current(version, epoch) && !releaseButtons()) fail(version);
@@ -270,6 +287,17 @@ final class PenMouse {
             if (!wanted && !active) return;
             float factor = speedFactor() * accelFactor(dx, dy);
             dx *= factor; dy *= factor;
+            if (wheelMode) {
+                // 滚轮模式：垂直位移累积成滚轮格，光标不动。
+                wheelAcc += dy;
+                int ticks = (int) (wheelAcc / 30f);
+                if (ticks != 0) {
+                    wheelAcc -= ticks * 30f;
+                    pendingWheel += ticks;
+                    ensureWheelTaskLocked();
+                }
+                return;
+            }
             if (pendingMotion != null) {
                 pendingMotion.dx += dx;
                 pendingMotion.dy += dy;
@@ -435,6 +463,42 @@ final class PenMouse {
             ev.recycle();
             return ok;
         } catch (Throwable failure) { return false; }
+    }
+
+    private void requestWheelToggle() {
+        synchronized (lock) {
+            if (!wanted && !active) return;
+            wheelMode = !wheelMode;
+            wheelAcc = 0;
+            pendingWheel = 0;
+        }
+        toast(wheelMode ? "滚轮模式：移动笔滚动页面" : "退出滚轮模式");
+    }
+
+    private void ensureWheelTaskLocked() {
+        if (wheelTaskQueued) return;
+        wheelTaskQueued = true;
+        long version = generation, epoch = context;
+        worker.post(() -> {
+            wheelTaskQueued = false;
+            int ticks;
+            synchronized (lock) { ticks = pendingWheel; pendingWheel = 0; }
+            if (ticks == 0 || !ready(version, epoch)) return;
+            try {
+                if (mouse != null) {
+                    int n = Math.abs(ticks) > 3 ? 3 * Integer.signum(ticks) : ticks;
+                    for (int i = 0; i < Math.abs(n); i++)
+                        if (!mouse.scroll(Integer.signum(n))) { fail(version); return; }
+                }
+            } catch (Throwable failure) { deviceFailure(version, failure); }
+        });
+    }
+
+    private void toast(String text) {
+        if (injector == null) return;
+        try {
+            injector.getMainExecutor().execute(() -> android.widget.Toast.makeText(injector, text, android.widget.Toast.LENGTH_SHORT).show());
+        } catch (Throwable ignored) { }
     }
 
     /** Injected key tap (home/recents/back) for configurable focus-key actions in mouse mode. */

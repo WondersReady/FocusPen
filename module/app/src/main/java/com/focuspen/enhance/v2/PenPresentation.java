@@ -27,6 +27,7 @@ final class PenPresentation {
     private final Object positionLock=new Object();
     private volatile PresentationState.Snapshot snapshot=state.snapshot();
     private volatile Handler worker;
+    private Runnable pendingDouble;
     private Context context;
     private ConfigClient config;
     private ClassLoader loader;
@@ -152,19 +153,26 @@ final class PenPresentation {
     // InputDispatcher owns the pointer target; only physical UP or explicit cancellation releases it.
     static void contextChanged(){OWNER.submit(()->{OWNER.cancelNow();OWNER.apply(OWNER.state.contextChanged());});}
     static void reset(){OWNER.submit(OWNER::resetNow);}
-    private void cancelNow(){effects(gesture.cancel());if(proDrawing!=null){proDrawing=null;apply(state.proDraw(false));}if(worker!=null)worker.removeCallbacks(tick);}
+    private void cancelNow(){if(pendingDouble!=null){if(worker!=null)worker.removeCallbacks(pendingDouble);pendingDouble=null;}effects(gesture.cancel());if(proDrawing!=null){proDrawing=null;apply(state.proDraw(false));}if(worker!=null)worker.removeCallbacks(tick);}
     private void resetNow(){cancelNow();held=null;synchronized(colors){colors.clear();}apply(state.reset());}
     private void schedule(){worker.removeCallbacks(tick);long next=gesture.nextDeadline();if(next!=Long.MAX_VALUE)worker.postAtTime(tick,next);}
     private void effects(List<FocusGesture.Effect> effects){for(FocusGesture.Effect effect:effects){
         switch(effect.kind()){
             case SINGLE -> {
-                if(snapshot.mode()==PresentationState.Mode.MOUSE)mouseFocus(ConfigSpec.MOUSE_FOCUS_SINGLE);
+                if(snapshot.mode()==PresentationState.Mode.MOUSE){
+                    if(pendingDouble!=null){worker.removeCallbacks(pendingDouble);pendingDouble=null;tripleTap();}
+                    else mouseFocus(ConfigSpec.MOUSE_FOCUS_SINGLE);
+                }
                 else apply(state.focusSingle());
             }
             case DOUBLE -> {
-                // Mouse mode owns the focus key: single/double/hold run configurable
-                // actions (home/recents/back) instead of presentation transitions.
-                if(snapshot.mode()==PresentationState.Mode.MOUSE)mouseFocus(ConfigSpec.MOUSE_FOCUS_DOUBLE);
+                // Mouse mode owns the focus key: single/double/triple/hold run configurable
+                // actions (home/recents/back/wheel) instead of presentation transitions.
+                if(snapshot.mode()==PresentationState.Mode.MOUSE){
+                    if(pendingDouble!=null)worker.removeCallbacks(pendingDouble);
+                    pendingDouble=()->{pendingDouble=null;mouseFocus(ConfigSpec.MOUSE_FOCUS_DOUBLE);};
+                    worker.postDelayed(pendingDouble,360);
+                }
                 else apply(state.focusDouble());
             }
             case HOLD -> {
@@ -188,6 +196,11 @@ final class PenPresentation {
             case "exitMouse" -> apply(state.reset());
             default -> { }
         }
+    }
+    private void tripleTap(){
+        String action;
+        try{action=config.get().text(ConfigSpec.MOUSE_FOCUS_TRIPLE);}catch(Throwable failure){return;}
+        if("wheel".equals(action))PenMouse.toggleWheel();
     }
     private void apply(PresentationState.Result result){
         snapshot=result.snapshot();

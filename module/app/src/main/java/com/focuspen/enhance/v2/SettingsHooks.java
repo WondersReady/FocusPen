@@ -477,6 +477,10 @@ final class SettingsHooks {
                                     new Object[]{"exitMouse","home","recents","back","none"},
                                     new String[]{"退出鼠标模式","回到桌面","多任务","返回键","无"},
                                     new String[]{"鼠标模式下长按焦点键：退出鼠标模式","鼠标模式下长按焦点键：回到桌面","鼠标模式下长按焦点键：打开多任务","鼠标模式下长按焦点键：执行返回","鼠标模式下长按焦点键：不执行操作"});
+                            choices(b, screen, ConfigSpec.MOUSE_FOCUS_TRIPLE, "焦点键 · 三击（鼠标模式下）",
+                                    new Object[]{"wheel","none"},
+                                    new String[]{"滚轮模式","无"},
+                                    new String[]{"鼠标模式下快速按三下焦点键：进入/退出滚轮模式，移动笔上下滚动页面（适合滑动评论区等触摸拖不动的区域）","鼠标模式下三击焦点键：不执行操作"});
                             continue;
                         }
                         Object buttonGroup = category(c, screen, "keys.button" + button, buttonName(button));

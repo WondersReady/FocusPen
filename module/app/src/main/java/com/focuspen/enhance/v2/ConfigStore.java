@@ -33,6 +33,7 @@ final class ConfigStore {
             if (schema < 16) { e.putInt(ConfigSpec.MOUSE_SPEED, 70); e.putString(ConfigSpec.MOUSE_LEFT, "touch"); e.putString(ConfigSpec.MOUSE_RIGHT, "back"); }
             if (schema < 17) { e.putString(ConfigSpec.MOUSE_FOCUS_SINGLE, "home"); e.putString(ConfigSpec.MOUSE_FOCUS_DOUBLE, "recents"); e.putString(ConfigSpec.MOUSE_FOCUS_HOLD, "exitMouse"); }
             if (schema < 18) { e.putBoolean(ConfigSpec.MOUSE_ACCEL, true); e.putInt(ConfigSpec.MOUSE_ACCEL_MIN, 55); e.putInt(ConfigSpec.MOUSE_ACCEL_MAX, 260); }
+            if (schema < 19) e.putString(ConfigSpec.MOUSE_FOCUS_TRIPLE, "wheel");
             e.putString("button3Short", "native").putString("button3Long", "native");
             // Replace only the previous seeded/preview list, preserving custom menus.
             RingContent content=RingContent.parse(p.getString(ConfigSpec.CONTENT,RingContent.DEFAULT));

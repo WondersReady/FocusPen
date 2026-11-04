@@ -8,11 +8,11 @@ import java.util.Map;
 final class ConfigSpec {
     // Suspended after device listening feedback. Keep stored fields for backup compatibility.
     static final boolean WRITING_AUDIO_AVAILABLE = false;
-    static final int SCHEMA = 18;
+    static final int SCHEMA = 19;
     static final String SCREEN_OFF_TARGET = "screenOffTarget";
     static final String LASER_ACTIVATION = "laserActivation";
     static final String MOUSE_SPEED = "mouseSpeed", MOUSE_LEFT = "mouseLeft", MOUSE_RIGHT = "mouseRight";
-    static final String MOUSE_FOCUS_SINGLE = "mouseFocusSingle", MOUSE_FOCUS_DOUBLE = "mouseFocusDouble", MOUSE_FOCUS_HOLD = "mouseFocusHold";
+    static final String MOUSE_FOCUS_SINGLE = "mouseFocusSingle", MOUSE_FOCUS_DOUBLE = "mouseFocusDouble", MOUSE_FOCUS_HOLD = "mouseFocusHold"; static final String MOUSE_FOCUS_TRIPLE = "mouseFocusTriple";
     static final String MOUSE_ACCEL = "mouseAccel", MOUSE_ACCEL_MIN = "mouseAccelMin", MOUSE_ACCEL_MAX = "mouseAccelMax";
     static final String[] PRO_GESTURES = {"proPinch", "proDouble", "proSlideUp", "proSlideDown"};
     static final String PROFILES = "applicationProfiles", SCREEN_OFF = "screenOffNote";
@@ -35,7 +35,7 @@ final class ConfigSpec {
         v.put(PROFILES, AppProfiles.EMPTY); v.put(SCREEN_OFF, false);
         v.put(SCREEN_OFF_TARGET, "note"); v.put(LASER_ACTIVATION, "hold");
         v.put(MOUSE_SPEED, 70); v.put(MOUSE_LEFT, "touch"); v.put(MOUSE_RIGHT, "back");
-        v.put(MOUSE_FOCUS_SINGLE, "home"); v.put(MOUSE_FOCUS_DOUBLE, "recents"); v.put(MOUSE_FOCUS_HOLD, "exitMouse");
+        v.put(MOUSE_FOCUS_SINGLE, "home"); v.put(MOUSE_FOCUS_DOUBLE, "recents"); v.put(MOUSE_FOCUS_HOLD, "exitMouse"); v.put(MOUSE_FOCUS_TRIPLE, "wheel");
         v.put(MOUSE_ACCEL, true); v.put(MOUSE_ACCEL_MIN, 55); v.put(MOUSE_ACCEL_MAX, 260);
         for(int i=0;i<ProBindings.KEYS.length;i++)v.put(ProBindings.KEYS[i],ProBindings.DEFAULTS[i]);
         v.put(ProBindings.INTERVAL,360);v.put(ProBindings.HOLD,650);
@@ -74,6 +74,9 @@ final class ConfigSpec {
             throw new IllegalArgumentException("Unknown mouse right mode");
         if ((MOUSE_FOCUS_SINGLE.equals(key) || MOUSE_FOCUS_DOUBLE.equals(key) || MOUSE_FOCUS_HOLD.equals(key))
                 && !java.util.Arrays.asList("home", "recents", "back", "exitMouse", "none").contains(value))
+            throw new IllegalArgumentException("Unknown mouse focus action");
+        if (MOUSE_FOCUS_TRIPLE.equals(key)
+                && !java.util.Arrays.asList("wheel", "none").contains(value))
             throw new IllegalArgumentException("Unknown mouse focus action");
         if (MOUSE_ACCEL_MIN.equals(key) && ((Integer) value < 20 || (Integer) value > 100))
             throw new IllegalArgumentException("Fine-speed factor must be between 20 and 100 percent");
