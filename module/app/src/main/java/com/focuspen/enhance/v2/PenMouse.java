@@ -59,11 +59,11 @@ final class PenMouse {
     // log curve so slow strokes stay precise and fast flicks travel further.
     private float velocity;
     private long lastMotionAt;
-    // Wheel mode: motion feeds the platform wheel instead of the cursor.
+    // Wheel mode: the pen hovers frozen; the side keys inject wheel notches and
+    // holding either key scrolls continuously (focus-key double-tap toggles).
     private boolean wheelMode; // worker only
-    private double wheelAcc; // worker only
-    private int pendingWheel; // worker only
-    private boolean wheelTaskQueued; // worker only
+    private int wheelHeld; // worker only: 0 none, 1 note key (up), 2 capture key (down)
+    private final Runnable wheelRepeat=this::wheelRepeatStep; // worker only
 
     PenMouse(Handler worker, Opener opener, BooleanSupplier allowed) {
         this(worker, opener, allowed, () -> { }, null, null);
@@ -136,7 +136,13 @@ final class PenMouse {
         if (m != null) m.changeContext();
     }
 
-    /** 滚轮模式开关：仅在鼠标模式生效。进入后移动笔变成滚动页面，再切一次或退出鼠标模式即恢复。 */
+    static boolean wheelActive() {
+        PenMouse m = instance;
+        if (m == null) return false;
+        synchronized (m.lock) { return m.wheelMode; }
+    }
+
+    /** 滚轮模式开关：仅在鼠标模式生效。进入后由速记/截图键滚动页面，再切一次或退出鼠标模式即恢复。 */
     static void toggleWheel() {
         PenMouse m = instance;
         if (m != null) m.requestWheelToggle();
@@ -185,8 +191,8 @@ final class PenMouse {
             velocity = 0;
             lastMotionAt = 0;
             wheelMode = false;
-            wheelAcc = 0;
-            pendingWheel = 0;
+            wheelHeld = 0;
+            worker.removeCallbacks(wheelRepeat);
             retireKeys();
             worker.post(this::closeDevice);
         }
@@ -201,8 +207,8 @@ final class PenMouse {
             velocity = 0;
             lastMotionAt = 0;
             wheelMode = false;
-            wheelAcc = 0;
-            pendingWheel = 0;
+            wheelHeld = 0;
+            worker.removeCallbacks(wheelRepeat);
             retireKeys();
             worker.post(() -> {
                 if (current(version, epoch) && !releaseButtons()) fail(version);
@@ -244,12 +250,33 @@ final class PenMouse {
 
     private void pressKey(KeyPress press) {
         if (!ready(press.session(), press.context())) return;
+        if (wheelMode) { wheelPress(press.button(), press.session()); return; }
         pressButton(press.button(), press, press.session());
     }
 
     private void releaseKey(KeyPress press) {
         if (!current(press.session(), press.context())) return;
+        if (wheelMode && wheelHeld == press.button()) { wheelHeld = 0; worker.removeCallbacks(wheelRepeat); return; }
         releaseButton(press.button(), press, press.session());
+    }
+
+    // 滚轮模式：点一下滚一格，按住不放持续滚动。
+    private void wheelPress(int button, long version) {
+        wheelHeld = button;
+        wheelScrollOnce(button, version);
+        worker.postDelayed(wheelRepeat, 160);
+    }
+
+    private void wheelRepeatStep() {
+        if (!wheelMode || wheelHeld == 0) return;
+        if (!current(generation, context)) return;
+        wheelScrollOnce(wheelHeld, generation);
+        worker.postDelayed(wheelRepeat, 120);
+    }
+
+    private void wheelScrollOnce(int button, long version) {
+        try { if (mouse != null && !mouse.scroll(button == 1 ? 1f : -1f)) fail(version); }
+        catch (Throwable failure) { deviceFailure(version, failure); }
     }
 
     private void requestAction(String action, boolean end, long version) {
@@ -287,17 +314,7 @@ final class PenMouse {
             if (!wanted && !active) return;
             float factor = speedFactor() * accelFactor(dx, dy);
             dx *= factor; dy *= factor;
-            if (wheelMode) {
-                // 滚轮模式：垂直位移累积成滚轮格，光标不动。
-                wheelAcc += dy;
-                int ticks = (int) (wheelAcc / 30f);
-                if (ticks != 0) {
-                    wheelAcc -= ticks * 30f;
-                    pendingWheel += ticks;
-                    ensureWheelTaskLocked();
-                }
-                return;
-            }
+            if (wheelMode) return; // 滚轮模式：笔悬停冻结，滚动由速记/截图键负责
             if (pendingMotion != null) {
                 pendingMotion.dx += dx;
                 pendingMotion.dy += dy;
@@ -469,30 +486,12 @@ final class PenMouse {
         synchronized (lock) {
             if (!wanted && !active) return;
             wheelMode = !wheelMode;
-            wheelAcc = 0;
-            pendingWheel = 0;
+            wheelHeld = 0;
         }
-        toast(wheelMode ? "滚轮模式：移动笔滚动页面" : "退出滚轮模式");
+        worker.removeCallbacks(wheelRepeat);
+        toast(wheelMode ? "滚轮模式：速记键上滚 · 截图键下滚（长按连滚），焦点键双击退出" : "退出滚轮模式");
     }
 
-    private void ensureWheelTaskLocked() {
-        if (wheelTaskQueued) return;
-        wheelTaskQueued = true;
-        long version = generation, epoch = context;
-        worker.post(() -> {
-            wheelTaskQueued = false;
-            int ticks;
-            synchronized (lock) { ticks = pendingWheel; pendingWheel = 0; }
-            if (ticks == 0 || !ready(version, epoch)) return;
-            try {
-                if (mouse != null) {
-                    int n = Math.abs(ticks) > 3 ? 3 * Integer.signum(ticks) : ticks;
-                    for (int i = 0; i < Math.abs(n); i++)
-                        if (!mouse.scroll(Integer.signum(n))) { fail(version); return; }
-                }
-            } catch (Throwable failure) { deviceFailure(version, failure); }
-        });
-    }
 
     private void toast(String text) {
         if (injector == null) return;

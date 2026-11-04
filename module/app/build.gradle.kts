@@ -13,8 +13,8 @@ android {
         applicationId = "io.github.wondersready.focuspen"
         minSdk = 28
         targetSdk = 37
-        versionCode = 63
-        versionName = "1.3.0"
+        versionCode = 64
+        versionName = "1.3.1"
     }
 
     compileOptions {

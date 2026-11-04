@@ -470,17 +470,14 @@ final class SettingsHooks {
                                     new String[]{"回到桌面","多任务","返回键","无"},
                                     new String[]{"鼠标模式下单击焦点键：回到桌面","鼠标模式下单击焦点键：打开多任务","鼠标模式下单击焦点键：执行返回","鼠标模式下单击焦点键：不执行操作"});
                             choices(b, screen, ConfigSpec.MOUSE_FOCUS_DOUBLE, "焦点键 · 双击（鼠标模式下）",
-                                    new Object[]{"recents","home","back","exitMouse","none"},
-                                    new String[]{"多任务","回到桌面","返回键","退出鼠标模式","无"},
-                                    new String[]{"鼠标模式下双击焦点键：打开多任务","鼠标模式下双击焦点键：回到桌面","鼠标模式下双击焦点键：执行返回","鼠标模式下双击焦点键：退出鼠标模式（替代旧版双击退出）","鼠标模式下双击焦点键：不执行操作"});
+                                    new Object[]{"wheel","recents","home","back","exitMouse","none"},
+                                    new String[]{"滚轮模式","多任务","回到桌面","返回键","退出鼠标模式","无"},
+                                    new String[]{"鼠标模式下双击焦点键：进入/退出滚轮模式（滚轮模式内速记键上滚、截图键下滚，长按持续滚动）","鼠标模式下双击焦点键：打开多任务","鼠标模式下双击焦点键：回到桌面","鼠标模式下双击焦点键：执行返回","鼠标模式下双击焦点键：退出鼠标模式","鼠标模式下双击焦点键：不执行操作"});
                             choices(b, screen, ConfigSpec.MOUSE_FOCUS_HOLD, "焦点键 · 长按（鼠标模式下）",
                                     new Object[]{"exitMouse","home","recents","back","none"},
                                     new String[]{"退出鼠标模式","回到桌面","多任务","返回键","无"},
                                     new String[]{"鼠标模式下长按焦点键：退出鼠标模式","鼠标模式下长按焦点键：回到桌面","鼠标模式下长按焦点键：打开多任务","鼠标模式下长按焦点键：执行返回","鼠标模式下长按焦点键：不执行操作"});
-                            choices(b, screen, ConfigSpec.MOUSE_FOCUS_TRIPLE, "焦点键 · 三击（鼠标模式下）",
-                                    new Object[]{"wheel","none"},
-                                    new String[]{"滚轮模式","无"},
-                                    new String[]{"鼠标模式下快速按三下焦点键：进入/退出滚轮模式，移动笔上下滚动页面（适合滑动评论区等触摸拖不动的区域）","鼠标模式下三击焦点键：不执行操作"});
+                            information(c,mouseGroup,"focus.mouse.wheel","滚轮模式怎么用","鼠标模式下双击焦点键进入：速记键点一下向上滚、长按连续上滚；截图键点一下向下滚、长按连续下滚；再双击焦点键退出滚轮模式（笔悬停不动，只滚动页面）。");
                             continue;
                         }
                         Object buttonGroup = category(c, screen, "keys.button" + button, buttonName(button));
