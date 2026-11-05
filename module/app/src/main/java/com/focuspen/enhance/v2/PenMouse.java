@@ -14,8 +14,17 @@ import java.util.function.BooleanSupplier;
 final class PenMouse {
     interface Opener { SystemMouseDevice open(int sourceDevice) throws Exception; }
 
+    /** Receives applied relative deltas and the initial absolute position for the drawn cursor. */
+    interface CursorObserver {
+        void moved(float dx, float dy);
+        void synced(float x, float y);
+    }
+
     private static final String TAG = "FocusPenMouse";
     private static volatile PenMouse instance;
+    private static volatile CursorObserver observer;
+
+    static void observe(CursorObserver value) { observer = value; }
 
     private record KeyIdentity(int device, int key, long downTime) { }
     private record KeyPress(KeyIdentity identity, int button, long session, long context) { }
@@ -50,6 +59,7 @@ final class PenMouse {
     private final Object[] buttonOwners = new Object[3]; // worker only
     private final Object[] actionOwners = { null, new Object(), new Object() };
     private SystemMouseDevice mouse; // worker only
+    private boolean headless; // worker only
     private Motion pendingMotion;
     private long generation;
     private long context;
@@ -164,7 +174,7 @@ final class PenMouse {
         SystemMouseDevice opened;
         try {
             if (!allowed.getAsBoolean()) throw new IllegalStateException("Mouse no longer allowed");
-            opened = Objects.requireNonNull(opener.open(sourceDevice));
+            opened = opener.open(sourceDevice); // null = headless
         } catch (Throwable failure) {
             Log.w(TAG, "Cannot open system mouse", failure);
             fail(version);
@@ -173,11 +183,25 @@ final class PenMouse {
         synchronized (lock) {
             if (wanted && generation == version) {
                 mouse = opened;
+                headless = opened == null;
                 active = true;
                 return;
             }
         }
         try { opened.close(); } catch (Throwable failure) { Log.w(TAG, "Cannot close canceled mouse", failure); }
+    }
+
+    private void syncCursorPosition(SystemMouseDevice opened, long version) {
+        worker.postDelayed(() -> {
+            synchronized (lock) {
+                if (!active || generation != version) return;
+            }
+            try {
+                android.graphics.PointF p = opened.position();
+                CursorObserver o = observer;
+                if (o != null && p != null) o.synced(p.x, p.y);
+            } catch (Throwable ignored) { }
+        }, 90);
     }
 
     private void requestExit() {
@@ -275,7 +299,7 @@ final class PenMouse {
     }
 
     private void wheelScrollOnce(int button, long version) {
-        try { if (mouse != null && !mouse.scroll(button == 1 ? 1f : -1f)) fail(version); }
+        try { if (!injectScroll(button == 1 ? 1f : -1f)) fail(version); }
         catch (Throwable failure) { deviceFailure(version, failure); }
     }
 
@@ -301,7 +325,7 @@ final class PenMouse {
                     pressButton(button, actionOwners[button], version);
                 } else if ("scrollUp".equals(action) || "scrollDown".equals(action)) {
                     try {
-                        if (!mouse.scroll("scrollUp".equals(action) ? 1f : -1f)) fail(version);
+                        if (!injectScroll("scrollUp".equals(action) ? 1f : -1f)) fail(version);
                     } catch (Throwable failure) { deviceFailure(version, failure); }
                 }
             });
@@ -331,8 +355,14 @@ final class PenMouse {
                         || Math.abs(motion.dx) > Float.MAX_VALUE
                         || Math.abs(motion.dy) > Float.MAX_VALUE) return;
                 try {
-                    if (!mouse.move((float) motion.dx, (float) motion.dy)) fail(motion.session);
-                    else touchDrag();
+                    if (headless) {
+                        touchDrag();
+                    } else if (!mouse.move((float) motion.dx, (float) motion.dy)) fail(motion.session);
+                    else {
+                        touchDrag();
+                        CursorObserver o = observer;
+                        if (o != null) o.moved((float) motion.dx, (float) motion.dy);
+                    }
                 } catch (Throwable failure) { deviceFailure(motion.session, failure); }
             });
         }
@@ -347,7 +377,7 @@ final class PenMouse {
     private boolean ready(long version, long epoch) {
         if (!current(version, epoch)) return false;
         try {
-            if (allowed.getAsBoolean()) return mouse != null;
+            if (allowed.getAsBoolean()) return headless || mouse != null;
         } catch (Throwable failure) {
             deviceFailure(version, failure);
             return false;
@@ -402,11 +432,11 @@ final class PenMouse {
     private void pressButton(int button, Object owner, long version) {
         if (buttonOwners[button] != null) return;
         try {
-            if (button == 1 && touchMode()) {
+            if (button == 1) {
                 if (!touchPress()) { fail(version); return; }
             } else if (button == 2 && backMode()) {
                 if (!backKey(true)) { fail(version); return; }
-            } else if (!mouse.button(button, true)) { fail(version); return; }
+            } else if (!headless && !mouse.button(button, true)) { fail(version); return; }
             buttonOwners[button] = owner;
         } catch (Throwable failure) { deviceFailure(version, failure); }
     }
@@ -417,7 +447,8 @@ final class PenMouse {
             boolean released;
             if (button == 1 && touchDown) released = touchRelease();
             else if (button == 2 && backDown) released = backKey(false);
-            else released = mouse.button(button, false);
+            else if (!headless) released = mouse.button(button, false);
+            else released = true;
             if (!released) { fail(version); return; }
             buttonOwners[button] = null;
         } catch (Throwable failure) { deviceFailure(version, failure); }
@@ -449,20 +480,45 @@ final class PenMouse {
     }
 
     private android.graphics.PointF cursor() {
+        if (headless) return PenPresentation.cursorPoint();
         try { return mouse == null ? null : mouse.position(); } catch (Throwable failure) { return null; }
     }
 
     private boolean injectTouch(int action, float px, float py) {
+        long now = android.os.SystemClock.uptimeMillis();
+        if (action == android.view.MotionEvent.ACTION_DOWN) touchDownTime = now;
+        return injectTouchTimed(action, px, py, touchDownTime, now);
+    }
+
+    // 无虚拟设备时的滚动：在光标处注入一段短滑动手势。
+    private boolean injectScroll(float amount) {
+        if (injector == null) return false;
+        android.graphics.PointF p = cursor();
+        if (p == null) return false;
+        try {
+            long t0 = android.os.SystemClock.uptimeMillis();
+            float dy = Math.max(-1f, Math.min(1f, amount)) * -55f;
+            injectTouchTimed(android.view.MotionEvent.ACTION_DOWN, p.x, p.y, t0, t0);
+            injectTouchTimed(android.view.MotionEvent.ACTION_MOVE, p.x, p.y + dy * 0.5f, t0, t0 + 16);
+            injectTouchTimed(android.view.MotionEvent.ACTION_MOVE, p.x, p.y + dy, t0, t0 + 32);
+            injectTouchTimed(android.view.MotionEvent.ACTION_UP, p.x, p.y + dy, t0, t0 + 48);
+            return true;
+        } catch (Throwable failure) { return false; }
+    }
+
+    static void dragCursor() {
+        PenMouse m = instance;
+        if (m != null) m.touchDrag();
+    }
+
+    // Gesture navigation (edge back, home bar) only reacts to finger touches,
+    // so injections use an explicit finger tool type.
+    private boolean injectTouchTimed(int action, float px, float py, long downTime, long eventTime) {
         if (injector == null) return false;
         try {
-            long now = android.os.SystemClock.uptimeMillis();
             android.view.MotionEvent.PointerProperties[] props = new android.view.MotionEvent.PointerProperties[1];
             props[0] = new android.view.MotionEvent.PointerProperties();
             props[0].id = 0;
-            // Gesture navigation (edge back, home bar) only reacts to finger touches.
-            // The short obtain() leaves the tool type UNKNOWN, which apps accept but
-            // the gesture monitors drop, so the bar and edge back must be injected
-            // with an explicit finger tool type.
             props[0].toolType = android.view.MotionEvent.TOOL_TYPE_FINGER;
             android.view.MotionEvent.PointerCoords[] coords = new android.view.MotionEvent.PointerCoords[1];
             coords[0] = new android.view.MotionEvent.PointerCoords();
@@ -472,7 +528,7 @@ final class PenMouse {
             coords[0].size = 0.05f;
             coords[0].touchMajor = 4.0f;
             coords[0].touchMinor = 4.0f;
-            android.view.MotionEvent ev = android.view.MotionEvent.obtain(touchDownTime, now, action,
+            android.view.MotionEvent ev = android.view.MotionEvent.obtain(downTime, eventTime, action,
                     1, props, coords, 0, 0, 1.0f, 1.0f, 0, 0,
                     android.view.InputDevice.SOURCE_TOUCHSCREEN, 0);
             Object manager = injector.getSystemService(android.hardware.input.InputManager.class);

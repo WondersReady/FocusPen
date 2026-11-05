@@ -43,6 +43,7 @@ final class PenPresentation {
     private List<?> viewports=List.of();
     private Rect frame=new Rect();
     private float x=Float.NaN,y=Float.NaN;
+    private boolean arrowCursor;
     private final Runnable tick=()->{
         if(!permitted()){resetNow();return;}
         effects(gesture.tick(SystemClock.uptimeMillis()));schedule();
@@ -85,9 +86,13 @@ final class PenPresentation {
         // 主页"触控服务"永远显示未连接；这里在演示层绑定时创建它，由它按需拉起触控服务。
         new PenMotionConnection(context, config);
         o.screenOn=context.getSystemService(android.os.PowerManager.class).isInteractive();
-        new PenMouse(worker,source->new SystemMouseDevice(o.loader,0),o::permitted,()->o.submit(()->{
+        new PenMouse(worker,source->source<0?null:new SystemMouseDevice(o.loader,0),o::permitted,()->o.submit(()->{
             if(o.snapshot.mode()==PresentationState.Mode.MOUSE)o.apply(o.state.reset());
         }),context,config::get);
+        PenMouse.observe(new PenMouse.CursorObserver(){
+            public void moved(float dx,float dy){o.arrowDelta(dx,dy);}
+            public void synced(float px,float py){o.arrowSync(px,py);}
+        });
         new Handler(Looper.getMainLooper()).post(()->{
             try {
                 PortedPresentationWindow created=new PortedPresentationWindow(context,epoch->o.submit(()->{
@@ -143,6 +148,15 @@ final class PenPresentation {
                 OWNER.proDrawing=identity;OWNER.apply(OWNER.state.proDraw(true));
             }
         });
+    }
+    static android.graphics.PointF cursorPoint(){
+        PenPresentation o=OWNER;
+        synchronized(o.positionLock){
+            if(o.frame.isEmpty())return null;
+            float px=Float.isFinite(o.x)?o.x:o.frame.exactCenterX();
+            float py=Float.isFinite(o.y)?o.y:o.frame.exactCenterY();
+            return new android.graphics.PointF(px,py);
+        }
     }
     static void mouseMode(int device){OWNER.submit(()->{if(OWNER.permitted()){OWNER.device=device;OWNER.apply(OWNER.state.enterMouse());}});}
     static void toggleMouse(){OWNER.submit(()->{if(!OWNER.permitted())return;if(OWNER.snapshot.mode()==PresentationState.Mode.MOUSE)OWNER.resetNow();else{OWNER.device=-1;OWNER.apply(OWNER.state.enterMouse());}});}
@@ -202,15 +216,22 @@ final class PenPresentation {
         snapshot=result.snapshot();
         for(PresentationState.Effect effect:result.effects())switch(effect.kind()){
             case CLEAR_INK -> {inkEpoch++;if(window!=null)window.clearInk(inkEpoch);}
-            case START_MOUSE -> PenMouse.enter(device);
-            case STOP_MOUSE -> PenMouse.exit();
+            case START_MOUSE -> {
+                // 单光标方案：不创建系统虚拟鼠标，自绘箭头即唯一光标。
+                PenMouse.enter(-1);
+                arrowCursor=true;
+                synchronized(positionLock){
+                    if(!frame.isEmpty()){x=frame.exactCenterX();y=frame.exactCenterY();position(x,y);}
+                }
+            }
+            case STOP_MOUSE -> { PenMouse.exit(); arrowCursor=false; }
             default -> { }
         }
         render();
         if(worker!=null){worker.removeCallbacks(watch);if(snapshot.mode()!=PresentationState.Mode.IDLE)worker.postDelayed(watch,150);}
     }
     private void render(){
-        if(window!=null){window.setColor(COLORS[snapshot.colorIndex()]);window.render(snapshot);}
+        if(window!=null){window.setArrowCursorEnabled(arrowCursor);window.setColor(COLORS[snapshot.colorIndex()]);window.render(snapshot);}
         if(context==null)return;
         int wanted=snapshot.mode()==PresentationState.Mode.IDLE?0:1;
         try {
@@ -228,9 +249,65 @@ final class PenPresentation {
             }
         } catch(Throwable failure){Log.w("FocusPenPresentation","Motion capability update failed",failure);}
     }
+    // 自绘光标：鼠标模式下把系统光标贴图换成空图标，消除系统贴图与 ROM
+    // 指针互斥造成的闪烁；箭头由 PortedPresentationWindow 绘制，跟随与隐藏
+    // 系统光标完全相同的位移流，点击分发与触摸注入不受影响。设置失败则
+    // 保持原生光标（不出现双光标）。
+    private void hideSystemCursor(){
+        arrowCursor=false;
+        if(context==null||loader==null)return;
+        try{
+            Object local=XposedHelpers.callStaticMethod(loader.loadClass("com.android.server.LocalServices"),"getService",
+                    loader.loadClass("com.android.server.input.InputManagerInternal"));
+            if(local==null)return;
+            Object service=XposedHelpers.getObjectField(local,"this$0");
+            int nullType=0;
+            try{Object nt=XposedHelpers.getStaticObjectField(android.view.PointerIcon.class,"TYPE_NULL");if(nt instanceof Number)nullType=((Number)nt).intValue();}catch(Throwable ignored){}
+            Object icon=null;
+            try{icon=XposedHelpers.callStaticMethod(android.view.PointerIcon.class,"getSystemIcon",context,nullType);}catch(Throwable ignored){}
+            boolean blank=false;
+            if(icon!=null){try{Object t=XposedHelpers.callMethod(icon,"getType");blank=t instanceof Number&&((Number)t).intValue()==nullType;}catch(Throwable ignored){}}
+            if(!blank){
+                android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(1,1,android.graphics.Bitmap.Config.ARGB_8888);
+                icon=XposedHelpers.callStaticMethod(android.view.PointerIcon.class,"createCustomIcon",bitmap,0f,0f);
+            }
+            XposedHelpers.callMethod(service,"setCustomPointerIcon",icon);
+            arrowCursor=true;
+        }catch(Throwable failure){Log.w("FocusPenPresentation","System cursor hide failed; keeping native cursor",failure);}
+    }
+    private void restoreSystemCursor(){
+        if(!arrowCursor)return;
+        arrowCursor=false;
+        try{
+            Object local=XposedHelpers.callStaticMethod(loader.loadClass("com.android.server.LocalServices"),"getService",
+                    loader.loadClass("com.android.server.input.InputManagerInternal"));
+            if(local==null)return;
+            Object service=XposedHelpers.getObjectField(local,"this$0");
+            XposedHelpers.callMethod(service,"setCustomPointerIcon",new Object[]{null});
+        }catch(Throwable ignored){}
+    }
+    private void arrowDelta(float dx,float dy){
+        if(!arrowCursor)return;
+        if(PenMouse.wheelActive())return;
+        if(!Float.isFinite(dx)||!Float.isFinite(dy))return;
+        synchronized(positionLock){
+            if(frame.isEmpty())return;
+            if(!Float.isFinite(x)||!Float.isFinite(y)){x=frame.exactCenterX();y=frame.exactCenterY();}
+            position(x+dx,y+dy);
+        }
+        PenMouse.dragCursor();
+    }
+    private void arrowSync(float px,float py){
+        if(!arrowCursor)return;
+        if(!Float.isFinite(px)||!Float.isFinite(py))return;
+        synchronized(positionLock){
+            if(frame.isEmpty())return;
+            position(px,py);
+        }
+    }
     private void motion(float dx,float dy){
         if(!Float.isFinite(dx)||!Float.isFinite(dy))return;
-        if(snapshot.mode()==PresentationState.Mode.MOUSE){PenMouse.relative(dx,dy);return;}
+        if(snapshot.mode()==PresentationState.Mode.MOUSE){arrowDelta(dx,dy);return;}
         synchronized(positionLock){
             if(frame.isEmpty())return;
             if(!Float.isFinite(x)||!Float.isFinite(y)){x=frame.exactCenterX();y=frame.exactCenterY();}

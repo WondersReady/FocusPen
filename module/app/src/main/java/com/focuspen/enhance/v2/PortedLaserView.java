@@ -17,6 +17,7 @@ import java.util.Objects;
 public final class PortedLaserView extends View {
     public static final int MODE_LASER = 0;
     public static final int MODE_PEN = 1;
+    public static final int MODE_MOUSE = 2;
 
     public record Style(
             float innerRadius,
@@ -63,6 +64,10 @@ public final class PortedLaserView extends View {
     private int pathColor;
     private float x;
     private float y;
+    private final float cursorScale;
+    private final Path cursorPath = new Path();
+    private final Paint cursorFill = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
+    private final Paint cursorOutline = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.DITHER_FLAG);
 
     public PortedLaserView(Context context, Style style, Drawable penImage) {
         super(context);
@@ -80,6 +85,21 @@ public final class PortedLaserView extends View {
         penTail.cubicTo(25.854f, 7.389f, 25.617f, 7.636f, 24.926f, 8.328f);
         penTail.lineTo(22.4595f, 10.7945f);
         penTail.close();
+        cursorPath.moveTo(0f, 0f);
+        cursorPath.lineTo(0f, 14.5f);
+        cursorPath.lineTo(3.6f, 11.1f);
+        cursorPath.lineTo(6.7f, 17.2f);
+        cursorPath.lineTo(9.2f, 15.9f);
+        cursorPath.lineTo(6.1f, 10.1f);
+        cursorPath.lineTo(11f, 10.1f);
+        cursorPath.close();
+        cursorScale = 1.9f * context.getResources().getDisplayMetrics().density;
+        cursorFill.setStyle(Paint.Style.FILL);
+        cursorFill.setColor(0xff141414);
+        cursorOutline.setStyle(Paint.Style.STROKE);
+        cursorOutline.setStrokeWidth(2.1f);
+        cursorOutline.setStrokeJoin(Paint.Join.ROUND);
+        cursorOutline.setColor(0xffffffff);
 
         innerPaint.setStyle(Paint.Style.FILL);
         outerBlurPaint.setStyle(Paint.Style.STROKE);
@@ -113,6 +133,13 @@ public final class PortedLaserView extends View {
             penTailPaint.setStrokeJoin(Paint.Join.ROUND);
             penTailPaint.setColor(Color.BLACK);
             canvas.drawPath(penTail, penTailPaint);
+            canvas.restoreToCount(save);
+        } else if (mode == MODE_MOUSE) {
+            int save = canvas.save();
+            canvas.translate(x, y);
+            canvas.scale(cursorScale, cursorScale);
+            canvas.drawPath(cursorPath, cursorOutline);
+            canvas.drawPath(cursorPath, cursorFill);
             canvas.restoreToCount(save);
         }
     }
