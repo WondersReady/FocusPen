@@ -29,6 +29,7 @@ public final class PortedPresentationWindow implements AutoCloseable {
     private boolean positioned;
     private boolean drawing;
     private boolean attached;
+    private boolean arrowEnabled;
     private boolean closed;
     private final java.util.function.LongConsumer inkStored;
     private long inkEpoch;
@@ -82,8 +83,18 @@ public final class PortedPresentationWindow implements AutoCloseable {
             mode = snapshot.mode();
             drawing = snapshot.drawing();
             view.setMode(mode == PresentationState.Mode.ANNOTATION
-                    ? PortedLaserView.MODE_PEN : PortedLaserView.MODE_LASER);
+                    ? PortedLaserView.MODE_PEN
+                    : mode == PresentationState.Mode.MOUSE
+                    ? PortedLaserView.MODE_MOUSE : PortedLaserView.MODE_LASER);
             view.setKeepPath(mode == PresentationState.Mode.ANNOTATION && drawing && positioned);
+            refreshWindow();
+        });
+    }
+
+    /** Whether the module draws its own mouse cursor (native sprite hidden). */
+    public void setArrowCursorEnabled(boolean value) {
+        submit(() -> {
+            arrowEnabled = value;
             refreshWindow();
         });
     }
@@ -165,7 +176,8 @@ public final class PortedPresentationWindow implements AutoCloseable {
 
     private void refreshWindow() {
         boolean showPointer = positioned && (mode == PresentationState.Mode.LASER
-                || mode == PresentationState.Mode.ANNOTATION);
+                || mode == PresentationState.Mode.ANNOTATION
+                || (mode == PresentationState.Mode.MOUSE && arrowEnabled));
         view.setPresentationVisible(showPointer);
         if (view.needExist() && !attached) {
             try {

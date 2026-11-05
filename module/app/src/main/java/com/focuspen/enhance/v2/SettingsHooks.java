@@ -315,6 +315,7 @@ final class SettingsHooks {
         Object screen = call(fragment, "getPreferenceScreen");
         Object guide = call(fragment, "findPreference", "guide");
         Object effects = call(fragment, "findPreference", "stylus_effects_settings");
+        Object officialFunctions = call(fragment, "findPreference", "stylus_function_settings");
         if (screen == null || guide == null || effects == null || call(fragment, "findPreference", PREFIX + "category") != null) return;
         Context c = (Context) call(fragment, "requireContext");
         Binding binding = new Binding(c);
@@ -333,8 +334,10 @@ final class SettingsHooks {
             slider(binding, group, ConfigSpec.AUDIO_VOLUME, "书写声音音量", 0, 100, 1);
         }
         navigation(c, group, "guide", "使用指南", "了解触控笔的功能与操作");
+        // Keep the official function/effects entries available on devices where
+        // "焦点鼠标" is hosted there; FocusPen adds its own controls separately.
         for (String key : new String[]{"guide", "function", "stylus_quick_note_screen_off", "touch_film_stylus_quick_operations",
-                "stylus_quick_write", "stylus_screen_shot", "stylus_function_settings", "stylus_effects_settings"}) {
+                "stylus_quick_write", "stylus_screen_shot"}) {
             Object item = call(fragment, "findPreference", key);
             if (item != null) {
                 boolean visible = (Boolean) call(item, "isVisible");
@@ -342,6 +345,10 @@ final class SettingsHooks {
             }
         }
         binding.updates.add(s -> call(ring, "h", s.available ? "添加常用功能与应用" : "配置暂不可用"));
+        binding.updates.add(s -> {
+            call(effects, "setEnabled", true);
+            if (officialFunctions != null) call(officialFunctions, "setEnabled", true);
+        });
         int order = (Integer) call(guide, "getOrder");
         Map<Object, Integer> shifted = new LinkedHashMap<>();
         for (String key : new String[]{"guide", "function"}) {
@@ -410,7 +417,7 @@ final class SettingsHooks {
             Object[] values = new Object[actionList.size()];
             String[] labels = new String[actionList.size()];
             for (int i = 0; i < actionList.size(); i++) { values[i] = actionList.get(i).id; labels[i] = actionList.get(i).label; }
-            choices(b, screen, page, page.startsWith("pro")?"焦点笔 Pro":"标准版焦点笔", values, labels, null);
+            choices(b, screen, page, page.startsWith("pro")?"焦点笔 Pro":title(page), values, labels, null);
         } else {
             Object group = category(c, screen, page + ".settings", title(page));
             switch (page) {
@@ -442,14 +449,41 @@ final class SettingsHooks {
                             Object buttonGroup=category(c,screen,"focus.help","演示操作");
                             information(c,buttonGroup,"focus.color","演示中切换颜色","激光或圈注时，短按速记键切换上一色，短按截图键切换下一色。已有笔迹保持原色。");
                             Object mouseGroup=category(c,screen,"focus.mouse","鼠标模式");
-                            information(c,mouseGroup,"focus.mouse.enter","双击焦点键切换","未启用激光或圈注时，快速双击焦点键进入鼠标模式；再次双击退出。");
-                            information(c,mouseGroup,"focus.mouse.buttons","点击与拖动","速记键为鼠标左键，截图键为右键；按住对应按键并移动笔可拖动。切换应用、窗口、状态栏或解锁时保持鼠标模式，息屏时退出；锁屏亮屏时也可进入鼠标模式。");
+                            information(c,mouseGroup,"focus.mouse.keys","三个按键说明","速记键、截图键是笔身侧键（即系统全局按键设置中的两枚侧键）；焦点键是笔上独立的焦点按键，用于激光、圈注与鼠标模式。下方每项都标明了对应哪个按键。");
+                            command(c,mouseGroup,"focus.mouse.enter","启用鼠标模式","点击立即启用或退出；空闲时双击焦点键进入，退出默认改为长按焦点键",()->{
+                                Bundle reply=c.getContentResolver().call(ConfigProvider.URI,"toggleMouse",null,null);
+                                if(reply==null||!reply.getBoolean("sent"))Toast.makeText(c,"鼠标模式尚未就绪，请确认系统输入已连接",Toast.LENGTH_SHORT).show();
+                            });
+                            information(c,mouseGroup,"focus.mouse.buttons","点击与拖动","速记键默认为触摸指针（按住移动等于手指拖动，评论区可滑动，与手指一致支持边缘返回和底部小白条），截图键默认为返回键；均可在下方切换为鼠标左右键。切换应用、窗口、状态栏或解锁时保持鼠标模式，息屏时退出。");
+                            slider(b, mouseGroup, ConfigSpec.MOUSE_SPEED, "鼠标指针速度（焦点笔控制光标）", 10, 150, 5);
+                            toggle(b, mouseGroup, ConfigSpec.MOUSE_ACCEL, "动态指针速度", "根据移动快慢实时变速：慢速按下方精细速度执行，快速滑动最高到下方快速上限，兼顾快速移动与精细操作");
+                            slider(b, mouseGroup, ConfigSpec.MOUSE_ACCEL_MIN, "动态速度 · 精细速度（%）", 20, 100, 5);
+                            slider(b, mouseGroup, ConfigSpec.MOUSE_ACCEL_MAX, "动态速度 · 快速上限（%）", 100, 500, 10);
+                            choices(b, screen, ConfigSpec.MOUSE_LEFT, "速记键 · 鼠标模式下的作用",
+                                    new Object[]{"touch","left"}, new String[]{"触摸指针","鼠标左键"},
+                                    new String[]{"按住并移动等于手指拖动，评论区可滑动，支持边缘返回和小白条","标准鼠标左键"});
+                            choices(b, screen, ConfigSpec.MOUSE_RIGHT, "截图键 · 鼠标模式下的作用",
+                                    new Object[]{"back","right"}, new String[]{"返回键","鼠标右键"},
+                                    new String[]{"按下为返回，按住等同长按返回","标准鼠标右键"});
+                            choices(b, screen, ConfigSpec.MOUSE_FOCUS_SINGLE, "焦点键 · 单击（鼠标模式下）",
+                                    new Object[]{"home","recents","back","none"},
+                                    new String[]{"回到桌面","多任务","返回键","无"},
+                                    new String[]{"鼠标模式下单击焦点键：回到桌面","鼠标模式下单击焦点键：打开多任务","鼠标模式下单击焦点键：执行返回","鼠标模式下单击焦点键：不执行操作"});
+                            choices(b, screen, ConfigSpec.MOUSE_FOCUS_DOUBLE, "焦点键 · 双击（鼠标模式下）",
+                                    new Object[]{"wheel","recents","home","back","exitMouse","none"},
+                                    new String[]{"滚轮模式","多任务","回到桌面","返回键","退出鼠标模式","无"},
+                                    new String[]{"鼠标模式下双击焦点键：进入/退出滚轮模式（滚轮模式内速记键上滚、截图键下滚，长按持续滚动）","鼠标模式下双击焦点键：打开多任务","鼠标模式下双击焦点键：回到桌面","鼠标模式下双击焦点键：执行返回","鼠标模式下双击焦点键：退出鼠标模式","鼠标模式下双击焦点键：不执行操作"});
+                            choices(b, screen, ConfigSpec.MOUSE_FOCUS_HOLD, "焦点键 · 长按（鼠标模式下）",
+                                    new Object[]{"exitMouse","home","recents","back","none"},
+                                    new String[]{"退出鼠标模式","回到桌面","多任务","返回键","无"},
+                                    new String[]{"鼠标模式下长按焦点键：退出鼠标模式","鼠标模式下长按焦点键：回到桌面","鼠标模式下长按焦点键：打开多任务","鼠标模式下长按焦点键：执行返回","鼠标模式下长按焦点键：不执行操作"});
+                            information(c,mouseGroup,"focus.mouse.wheel","滚轮模式怎么用","鼠标模式下双击焦点键进入：速记键点一下向上滚、长按连续上滚；截图键点一下向下滚、长按连续下滚；再双击焦点键退出滚轮模式（笔悬停不动，只滚动页面）。");
                             continue;
                         }
                         Object buttonGroup = category(c, screen, "keys.button" + button, buttonName(button));
                         for (String suffix : new String[]{"Short", "Long", "Double"}) {
                             String key = "button" + button + suffix;
-                            Object actionRow = navigation(c, buttonGroup, key, suffix.equals("Short")?"短按功能":suffix.equals("Long") ? "长按功能" : "快速双击功能", null);
+                            Object actionRow = navigation(c, buttonGroup, key, buttonName(button) + " · " + (suffix.equals("Short") ? "单击" : suffix.equals("Long") ? "长按" : "快速双击"), null);
                             b.updates.add(s -> call(actionRow, "h", PenAction.parse(s.text(key)).label));
                         }
                     }
@@ -1072,6 +1106,11 @@ final class SettingsHooks {
         if (p.startsWith("templateField:")) return fieldTitle(Integer.parseInt(p.split(":")[2]));
         if (p.startsWith("template:")) return "编辑模板";
         if (p.startsWith("field:")) return fieldTitle(Integer.parseInt(p.split(":")[2]));
+        // 按键动作选择页：标题直接标明"哪个键 + 什么操作"，进入菜单后无需对照上一页
+        if (p.length() > 8 && p.startsWith("button") && "123".indexOf(p.charAt(6)) >= 0) {
+            String gesture = p.endsWith("Short") ? "单击" : p.endsWith("Long") ? "长按" : p.endsWith("Double") ? "快速双击" : null;
+            if (gesture != null) return buttonName(p.charAt(6) - '0') + " · " + gesture;
+        }
         switch (p) {
             case "ring": return "弧形菜单"; case "preview": return "笔尖预览"; case "keys": return "全局按键设置";case "pro":return "焦点笔 Pro";
             case "rules": return "应用配置文件"; case "guide": return "使用指南";

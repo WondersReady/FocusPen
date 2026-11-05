@@ -8,9 +8,12 @@ import java.util.Map;
 final class ConfigSpec {
     // Suspended after device listening feedback. Keep stored fields for backup compatibility.
     static final boolean WRITING_AUDIO_AVAILABLE = false;
-    static final int SCHEMA = 15;
+    static final int SCHEMA = 20;
     static final String SCREEN_OFF_TARGET = "screenOffTarget";
     static final String LASER_ACTIVATION = "laserActivation";
+    static final String MOUSE_SPEED = "mouseSpeed", MOUSE_LEFT = "mouseLeft", MOUSE_RIGHT = "mouseRight";
+    static final String MOUSE_FOCUS_SINGLE = "mouseFocusSingle", MOUSE_FOCUS_DOUBLE = "mouseFocusDouble", MOUSE_FOCUS_HOLD = "mouseFocusHold"; static final String MOUSE_FOCUS_TRIPLE = "mouseFocusTriple";
+    static final String MOUSE_ACCEL = "mouseAccel", MOUSE_ACCEL_MIN = "mouseAccelMin", MOUSE_ACCEL_MAX = "mouseAccelMax";
     static final String[] PRO_GESTURES = {"proPinch", "proDouble", "proSlideUp", "proSlideDown"};
     static final String PROFILES = "applicationProfiles", SCREEN_OFF = "screenOffNote";
     static final String CONTENT = "ringContent";
@@ -31,6 +34,9 @@ final class ConfigSpec {
         v.put(CONTENT, RingContent.DEFAULT);
         v.put(PROFILES, AppProfiles.EMPTY); v.put(SCREEN_OFF, false);
         v.put(SCREEN_OFF_TARGET, "note"); v.put(LASER_ACTIVATION, "hold");
+        v.put(MOUSE_SPEED, 70); v.put(MOUSE_LEFT, "touch"); v.put(MOUSE_RIGHT, "back");
+        v.put(MOUSE_FOCUS_SINGLE, "none"); v.put(MOUSE_FOCUS_DOUBLE, "wheel"); v.put(MOUSE_FOCUS_HOLD, "exitMouse"); v.put(MOUSE_FOCUS_TRIPLE, "wheel");
+        v.put(MOUSE_ACCEL, true); v.put(MOUSE_ACCEL_MIN, 55); v.put(MOUSE_ACCEL_MAX, 260);
         for(int i=0;i<ProBindings.KEYS.length;i++)v.put(ProBindings.KEYS[i],ProBindings.DEFAULTS[i]);
         v.put(ProBindings.INTERVAL,360);v.put(ProBindings.HOLD,650);
         v.put("button1Double", "none"); v.put("button2Double", "none");
@@ -60,6 +66,25 @@ final class ConfigSpec {
             throw new IllegalArgumentException("Unknown screen-off target");
         if (LASER_ACTIVATION.equals(key) && !"hold".equals(value) && !"toggle".equals(value))
             throw new IllegalArgumentException("Unknown laser activation");
+        if (MOUSE_SPEED.equals(key) && ((Integer) value < 10 || (Integer) value > 150))
+            throw new IllegalArgumentException("Mouse speed must be between 10 and 150 percent");
+        if (MOUSE_LEFT.equals(key) && !"touch".equals(value) && !"left".equals(value))
+            throw new IllegalArgumentException("Unknown mouse left mode");
+        if (MOUSE_RIGHT.equals(key) && !"back".equals(value) && !"right".equals(value))
+            throw new IllegalArgumentException("Unknown mouse right mode");
+        if ((MOUSE_FOCUS_SINGLE.equals(key) || MOUSE_FOCUS_HOLD.equals(key))
+                && !java.util.Arrays.asList("home", "recents", "back", "exitMouse", "none").contains(value))
+            throw new IllegalArgumentException("Unknown mouse focus action");
+        if (MOUSE_FOCUS_DOUBLE.equals(key)
+                && !java.util.Arrays.asList("wheel", "home", "recents", "back", "exitMouse", "none").contains(value))
+            throw new IllegalArgumentException("Unknown mouse focus action");
+        if (MOUSE_FOCUS_TRIPLE.equals(key)
+                && !java.util.Arrays.asList("wheel", "none").contains(value))
+            throw new IllegalArgumentException("Unknown mouse focus action");
+        if (MOUSE_ACCEL_MIN.equals(key) && ((Integer) value < 20 || (Integer) value > 100))
+            throw new IllegalArgumentException("Fine-speed factor must be between 20 and 100 percent");
+        if (MOUSE_ACCEL_MAX.equals(key) && ((Integer) value < 100 || (Integer) value > 500))
+            throw new IllegalArgumentException("Boost limit must be between 100 and 500 percent");
         int pro=java.util.Arrays.asList(ProBindings.KEYS).indexOf(key);if(pro>=0)ProBindings.validate(pro,(String)value);
         if(ProBindings.INTERVAL.equals(key)&&((Integer)value<220||(Integer)value>600))throw new IllegalArgumentException("Invalid pinch interval");
         if(ProBindings.HOLD.equals(key)&&((Integer)value<300||(Integer)value>1500))throw new IllegalArgumentException("Invalid pinch hold");

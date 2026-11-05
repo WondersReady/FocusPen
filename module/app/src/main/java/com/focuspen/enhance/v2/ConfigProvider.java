@@ -46,6 +46,10 @@ public final class ConfigProvider extends ContentProvider {
             if (!own && !"com.miui.securitycore".equals(caller)) throw new SecurityException("Settings host required");
             Bundle out = new Bundle(); out.putBoolean("sent", RuntimeBus.preview()); return out;
         }
+        if ("toggleMouse".equals(method)) {
+            if (!own && !"com.miui.securitycore".equals(caller)) throw new SecurityException("Settings host required");
+            Bundle out = new Bundle(); out.putBoolean("sent", RuntimeBus.toggleMouse()); return out;
+        }
         if (METHOD_PREPARE_EDIT.equals(method)) {
             if (!own && !"com.miui.securitycore".equals(caller)) throw new SecurityException("Settings host required");
             Object value = extras == null ? null : extras.get("value");

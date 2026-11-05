@@ -13,8 +13,8 @@ android {
         applicationId = "io.github.wondersready.focuspen"
         minSdk = 28
         targetSdk = 37
-        versionCode = 51
-        versionName = "1.1"
+        versionCode = 66
+        versionName = "1.3.3"
     }
 
     compileOptions {
@@ -30,6 +30,17 @@ android {
     lint {
         abortOnError = false
         checkReleaseBuilds = false
+    }
+
+    buildTypes {
+        debug {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+        }
     }
 }
 
